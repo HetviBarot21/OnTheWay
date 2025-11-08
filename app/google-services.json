@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "946780824181",
+    "project_id": "ontheway-fbe72",
+    "storage_bucket": "ontheway-fbe72.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:946780824181:android:c42ce1cd03f272e4598e3c",
+        "android_client_info": {
+          "package_name": "com.example.ontheway"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCL5bNZR73Ubq-Vd7vXT2YpYPGqEi7DMUY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
