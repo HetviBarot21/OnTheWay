@@ -1,5 +1,6 @@
 package com.example.ontheway.services
 
+import android.util.Log
 import com.example.ontheway.models.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -120,29 +121,46 @@ class CircleService {
         val userId = auth.currentUser?.uid ?: throw Exception("User not authenticated")
         
         return try {
+            Log.d("CircleService", "Searching for circle with code: $inviteCode")
+            Log.d("CircleService", "Current user: $userId")
+            
             val snapshot = firestore.collection("circles")
                 .whereEqualTo("inviteCode", inviteCode)
                 .limit(1)
                 .get()
                 .await()
             
+            Log.d("CircleService", "Query returned ${snapshot.documents.size} documents")
+            
             val circle = snapshot.documents.firstOrNull()?.toObject(Circle::class.java)
             
-            if (circle != null && !circle.members.contains(userId)) {
-                // Add user to circle
-                val updatedMembers = circle.members + userId
-                firestore.collection("circles")
-                    .document(circle.circleId)
-                    .update("members", updatedMembers)
-                    .await()
+            if (circle != null) {
+                Log.d("CircleService", "Found circle: ${circle.name} (ID: ${circle.circleId})")
+                Log.d("CircleService", "Circle has ${circle.members.size} members")
                 
-                addUserToCircle(circle.circleId, userId)
-                
-                circle.copy(members = updatedMembers)
+                if (!circle.members.contains(userId)) {
+                    Log.d("CircleService", "Adding user $userId to circle")
+                    // Add user to circle
+                    val updatedMembers = circle.members + userId
+                    firestore.collection("circles")
+                        .document(circle.circleId)
+                        .update("members", updatedMembers)
+                        .await()
+                    
+                    addUserToCircle(circle.circleId, userId)
+                    
+                    Log.d("CircleService", "Successfully added user to circle")
+                    circle.copy(members = updatedMembers)
+                } else {
+                    Log.d("CircleService", "User already in circle")
+                    circle
+                }
             } else {
-                circle
+                Log.w("CircleService", "No circle found with invite code: $inviteCode")
+                null
             }
         } catch (e: Exception) {
+            Log.e("CircleService", "Error joining circle with code $inviteCode", e)
             e.printStackTrace()
             null
         }
