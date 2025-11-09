@@ -9,7 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
 
 @Composable
 fun SignUpScreen(
@@ -24,7 +24,7 @@ fun SignUpScreen(
     var errorMessage by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     
-    val auth = FirebaseAuth.getInstance()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -130,29 +130,30 @@ fun SignUpScreen(
                     else -> {
                         isLoading = true
                         errorMessage = ""
-                        auth.createUserWithEmailAndPassword(email, password)
-                            .addOnCompleteListener { task ->
-                                if (task.isSuccessful) {
-                                    // Save user data to Firestore
-                                    val userId = auth.currentUser?.uid
-                                    if (userId != null) {
-                                        saveUserData(userId, name, email, phoneNumber) { success ->
-                                            isLoading = false
-                                            if (success) {
-                                                onSignUpSuccess()
-                                            } else {
-                                                errorMessage = "Failed to save user data. Please try again."
-                                            }
-                                        }
-                                    } else {
-                                        isLoading = false
-                                        errorMessage = "Failed to create user profile"
+                        scope.launch {
+                            val result = FirebaseAuthHelper.registerUser(
+                                email = email,
+                                password = password,
+                                name = name,
+                                phoneNumber = phoneNumber
+                            )
+                            
+                            isLoading = false
+                            result.fold(
+                                onSuccess = { onSignUpSuccess() },
+                                onFailure = { e ->
+                                    errorMessage = when {
+                                        e.message?.contains("email address is already in use") == true ->
+                                            "Email already registered"
+                                        e.message?.contains("email address is badly formatted") == true ->
+                                            "Invalid email format"
+                                        e.message?.contains("network error") == true ->
+                                            "Network error. Check your connection"
+                                        else -> e.message ?: "Sign up failed"
                                     }
-                                } else {
-                                    isLoading = false
-                                    errorMessage = task.exception?.message ?: "Sign up failed"
                                 }
-                            }
+                            )
+                        }
                     }
                 }
             },
@@ -180,34 +181,4 @@ fun SignUpScreen(
     }
 }
 
-private fun saveUserData(
-    userId: String,
-    name: String,
-    email: String,
-    phoneNumber: String,
-    onComplete: (Boolean) -> Unit
-) {
-    val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-    val circleService = com.example.ontheway.services.CircleService()
-    
-    val user = com.example.ontheway.models.User(
-        userId = userId,
-        name = name,
-        email = email,
-        phoneNumber = phoneNumber,
-        phoneHash = circleService.hashPhoneNumber(phoneNumber),
-        createdAt = System.currentTimeMillis(),
-        updatedAt = System.currentTimeMillis()
-    )
-    
-    firestore.collection("users")
-        .document(userId)
-        .set(user)
-        .addOnSuccessListener {
-            onComplete(true)
-        }
-        .addOnFailureListener { e ->
-            e.printStackTrace()
-            onComplete(false)
-        }
-}
+

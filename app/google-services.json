@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "946780824181",
-    "project_id": "ontheway-fbe72",
-    "storage_bucket": "ontheway-fbe72.firebasestorage.app"
+    "project_number": "634825238703",
+    "project_id": "ontheway-vinit",
+    "storage_bucket": "ontheway-vinit.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:946780824181:android:c42ce1cd03f272e4598e3c",
+        "mobilesdk_app_id": "1:634825238703:android:9eec2f3672dbe215b48c5a",
         "android_client_info": {
-          "package_name": "com.example.ontheway"
+          "package_name": "OnTheWay.vinit"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCL5bNZR73Ubq-Vd7vXT2YpYPGqEi7DMUY"
+          "current_key": "AIzaSyA47xg36FmAWa3VFzWvo6t-J3olgYyJjq8"
         }
       ],
       "services": {

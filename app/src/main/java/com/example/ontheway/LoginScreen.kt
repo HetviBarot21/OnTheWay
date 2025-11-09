@@ -9,7 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
@@ -21,7 +21,7 @@ fun LoginScreen(
     var errorMessage by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     
-    val auth = FirebaseAuth.getInstance()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -81,15 +81,24 @@ fun LoginScreen(
             onClick = {
                 isLoading = true
                 errorMessage = ""
-                auth.signInWithEmailAndPassword(email, password)
-                    .addOnCompleteListener { task ->
-                        isLoading = false
-                        if (task.isSuccessful) {
-                            onLoginSuccess()
-                        } else {
-                            errorMessage = task.exception?.message ?: "Login failed"
+                scope.launch {
+                    val result = FirebaseAuthHelper.loginUser(email, password)
+                    
+                    isLoading = false
+                    result.fold(
+                        onSuccess = { onLoginSuccess() },
+                        onFailure = { e ->
+                            errorMessage = when {
+                                e.message?.contains("no user record") == true ||
+                                e.message?.contains("invalid-credential") == true ->
+                                    "Invalid email or password"
+                                e.message?.contains("network error") == true ->
+                                    "Network error. Check your connection"
+                                else -> e.message ?: "Login failed"
+                            }
                         }
-                    }
+                    )
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
