@@ -136,9 +136,13 @@ fun SignUpScreen(
                                     // Save user data to Firestore
                                     val userId = auth.currentUser?.uid
                                     if (userId != null) {
-                                        saveUserData(userId, name, email, phoneNumber) {
+                                        saveUserData(userId, name, email, phoneNumber) { success ->
                                             isLoading = false
-                                            onSignUpSuccess()
+                                            if (success) {
+                                                onSignUpSuccess()
+                                            } else {
+                                                errorMessage = "Failed to save user data. Please try again."
+                                            }
                                         }
                                     } else {
                                         isLoading = false
@@ -181,7 +185,7 @@ private fun saveUserData(
     name: String,
     email: String,
     phoneNumber: String,
-    onComplete: () -> Unit
+    onComplete: (Boolean) -> Unit
 ) {
     val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
     val circleService = com.example.ontheway.services.CircleService()
@@ -200,9 +204,10 @@ private fun saveUserData(
         .document(userId)
         .set(user)
         .addOnSuccessListener {
-            onComplete()
+            onComplete(true)
         }
-        .addOnFailureListener {
-            onComplete()
+        .addOnFailureListener { e ->
+            e.printStackTrace()
+            onComplete(false)
         }
 }

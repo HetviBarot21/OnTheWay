@@ -163,11 +163,17 @@ fun CirclesScreen(
     if (showCreateDialog) {
         CreateCircleDialog(
             onDismiss = { showCreateDialog = false },
-            onCreate = { name ->
+            onCreate = { name, onComplete ->
                 scope.launch {
-                    val newCircle = circleService.createCircle(name)
-                    circles = circles + newCircle
-                    showCreateDialog = false
+                    try {
+                        val newCircle = circleService.createCircle(name)
+                        circles = circles + newCircle
+                        onComplete(true, null)
+                        showCreateDialog = false
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        onComplete(false, "Failed to create circle. Please try again.")
+                    }
                 }
             }
         )
@@ -176,12 +182,20 @@ fun CirclesScreen(
     if (showJoinDialog) {
         JoinCircleDialog(
             onDismiss = { showJoinDialog = false },
-            onJoin = { inviteCode ->
+            onJoin = { inviteCode, onComplete ->
                 scope.launch {
-                    val circle = circleService.joinCircleWithCode(inviteCode)
-                    if (circle != null) {
-                        circles = circleService.getUserCircles()
-                        showJoinDialog = false
+                    try {
+                        val circle = circleService.joinCircleWithCode(inviteCode)
+                        if (circle != null) {
+                            circles = circleService.getUserCircles()
+                            onComplete(true, null)
+                            showJoinDialog = false
+                        } else {
+                            onComplete(false, "Circle not found. Please check the invite code.")
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        onComplete(false, "Failed to join circle. Please try again.")
                     }
                 }
             }
@@ -484,7 +498,7 @@ fun CircleCard(circle: Circle, onClick: () -> Unit) {
 @Composable
 fun CreateCircleDialog(
     onDismiss: () -> Unit,
-    onCreate: (String) -> Unit
+    onCreate: (String, (Boolean, String?) -> Unit) -> Unit
 ) {
     var circleName by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
@@ -548,7 +562,12 @@ fun CreateCircleDialog(
                             }
                             else -> {
                                 isCreating = true
-                                onCreate(circleName.trim())
+                                onCreate(circleName.trim()) { success, error ->
+                                    isCreating = false
+                                    if (!success && error != null) {
+                                        errorMessage = error
+                                    }
+                                }
                             }
                         }
                     }
@@ -570,7 +589,7 @@ fun CreateCircleDialog(
 @Composable
 fun JoinCircleDialog(
     onDismiss: () -> Unit,
-    onJoin: (String) -> Unit
+    onJoin: (String, (Boolean, String?) -> Unit) -> Unit
 ) {
     var inviteCode by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
@@ -637,7 +656,12 @@ fun JoinCircleDialog(
                             }
                             else -> {
                                 isJoining = true
-                                onJoin(inviteCode.trim())
+                                onJoin(inviteCode.trim()) { success, error ->
+                                    isJoining = false
+                                    if (!success && error != null) {
+                                        errorMessage = error
+                                    }
+                                }
                             }
                         }
                     }

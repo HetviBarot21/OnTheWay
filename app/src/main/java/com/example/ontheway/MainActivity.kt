@@ -42,8 +42,9 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun AppNavigation() {
         val auth = FirebaseAuth.getInstance()
-        val startScreen = if (auth.currentUser != null) "home" else "landing"
-        var currentScreen by remember { mutableStateOf(startScreen) }
+        var currentScreen by remember { 
+            mutableStateOf(if (auth.currentUser != null) "home" else "landing") 
+        }
         var selectedCircleId by remember { mutableStateOf<String?>(null) }
 
         when (currentScreen) {

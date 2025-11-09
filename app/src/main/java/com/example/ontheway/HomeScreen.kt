@@ -25,7 +25,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.ontheway.models.CircleMember
 import com.example.ontheway.services.CircleService
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.plugin.annotation.annotations
@@ -241,6 +244,7 @@ fun HomeScreen(
 fun AllMembersMap(members: List<CircleMember>) {
     val context = LocalContext.current
     var mapView by remember { mutableStateOf<MapView?>(null) }
+    var hasSetInitialCamera by remember { mutableStateOf(false) }
     
     DisposableEffect(Unit) {
         onDispose {
@@ -266,6 +270,23 @@ fun AllMembersMap(members: List<CircleMember>) {
                                 locationPlugin.updateSettings {
                                     this.enabled = true
                                     this.pulsingEnabled = true
+                                }
+                                
+                                // Get current location and center map
+                                val fusedLocationClient: FusedLocationProviderClient = 
+                                    LocationServices.getFusedLocationProviderClient(ctx)
+                                
+                                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                                    location?.let {
+                                        if (!hasSetInitialCamera) {
+                                            val cameraOptions = CameraOptions.Builder()
+                                                .center(Point.fromLngLat(it.longitude, it.latitude))
+                                                .zoom(13.0)
+                                                .build()
+                                            mv.getMapboxMap().setCamera(cameraOptions)
+                                            hasSetInitialCamera = true
+                                        }
+                                    }
                                 }
                             }
                             
