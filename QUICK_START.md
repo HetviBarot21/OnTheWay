@@ -32,7 +32,7 @@
 
 ### Step 1: Enable Firebase Authentication (2 minutes)
 
-1. Open: https://console.firebase.google.com/project/ontheway-fbe72/authentication
+1. Open: https://console.firebase.google.com/project/ontheway-vinit/authentication
 2. Click **"Get Started"**
 3. Click **"Email/Password"**
 4. Toggle **"Enable"**
@@ -40,7 +40,7 @@
 
 ### Step 2: Enable Cloud Firestore (3 minutes)
 
-1. Open: https://console.firebase.google.com/project/ontheway-fbe72/firestore
+1. Open: https://console.firebase.google.com/project/ontheway-vinit/firestore
 2. Click **"Create database"**
 3. Select **"Start in test mode"** (for development)
 4. Choose a location close to you:
@@ -66,7 +66,7 @@ firebase init firestore
 
 # When prompted:
 # - Select "Use an existing project"
-# - Choose "ontheway-fbe72"
+# - Choose "ontheway-vinit"
 # - For rules file: press Enter (use firestore.rules)
 # - For indexes file: press Enter (use firestore.indexes.json)
 

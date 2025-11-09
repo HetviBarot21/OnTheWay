@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:634825238703:android:9eec2f3672dbe215b48c5a",
+        "mobilesdk_app_id": "1:634825238703:android:755e2f77dde49f44b48c5a",
         "android_client_info": {
-          "package_name": "OnTheWay.vinit"
+          "package_name": "com.example.ontheway"
         }
       },
       "oauth_client": [],

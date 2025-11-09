@@ -2,7 +2,7 @@
 
 ## Step 1: Enable Firebase Authentication
 
-1. Go to [Firebase Console](https://console.firebase.google.com/project/ontheway-fbe72)
+1. Go to [Firebase Console](https://console.firebase.google.com/project/ontheway-vinit)
 2. Click **Authentication** in the left menu
 3. Click **Get Started**
 4. Enable **Email/Password** sign-in method:
