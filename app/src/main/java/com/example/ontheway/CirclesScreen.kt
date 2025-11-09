@@ -216,9 +216,9 @@ fun CircleCard(circle: Circle, onClick: () -> Unit) {
     var members by remember { mutableStateOf(listOf<CircleMember>()) }
     var isLoadingMembers by remember { mutableStateOf(false) }
     
-    // Load members when expanded
-    LaunchedEffect(isExpanded) {
-        if (isExpanded && members.isEmpty()) {
+    // Load members when expanded or when circle members change
+    LaunchedEffect(isExpanded, circle.members.size) {
+        if (isExpanded) {
             isLoadingMembers = true
             members = circleService.getCircleMembers(circle.circleId)
             isLoadingMembers = false

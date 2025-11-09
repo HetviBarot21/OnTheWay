@@ -64,15 +64,24 @@ class CircleService {
     // Get circle members with their locations
     suspend fun getCircleMembers(circleId: String): List<CircleMember> {
         return try {
+            Log.d("CircleService", "Getting members for circle: $circleId")
+            
             val circle = firestore.collection("circles")
                 .document(circleId)
                 .get()
                 .await()
-                .toObject(Circle::class.java) ?: return emptyList()
+                .toObject(Circle::class.java) ?: run {
+                    Log.w("CircleService", "Circle not found: $circleId")
+                    return emptyList()
+                }
+            
+            Log.d("CircleService", "Circle has ${circle.members.size} member IDs: ${circle.members}")
             
             val members = mutableListOf<CircleMember>()
             
             for (memberId in circle.members) {
+                Log.d("CircleService", "Fetching user data for: $memberId")
+                
                 // Get user info
                 val userDoc = firestore.collection("users")
                     .document(memberId)
@@ -81,17 +90,28 @@ class CircleService {
                 
                 val user = userDoc.toObject(User::class.java)
                 
-                // Get latest location
-                val locationDoc = firestore.collection("locations")
-                    .document(memberId)
-                    .collection("updates")
-                    .whereEqualTo("circleId", circleId)
-                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                    .limit(1)
-                    .get()
-                    .await()
+                if (user != null) {
+                    Log.d("CircleService", "Found user: ${user.name} (${user.email})")
+                } else {
+                    Log.w("CircleService", "User document not found for: $memberId")
+                }
                 
-                val location = locationDoc.documents.firstOrNull()?.toObject(LocationUpdate::class.java)
+                // Get latest location (skip if fails)
+                val location = try {
+                    val locationDoc = firestore.collection("locations")
+                        .document(memberId)
+                        .collection("updates")
+                        .whereEqualTo("circleId", circleId)
+                        .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                        .limit(1)
+                        .get()
+                        .await()
+                    
+                    locationDoc.documents.firstOrNull()?.toObject(LocationUpdate::class.java)
+                } catch (e: Exception) {
+                    Log.w("CircleService", "Could not fetch location for $memberId: ${e.message}")
+                    null
+                }
                 
                 if (user != null) {
                     members.add(
@@ -109,8 +129,10 @@ class CircleService {
                 }
             }
             
+            Log.d("CircleService", "Returning ${members.size} members")
             members
         } catch (e: Exception) {
+            Log.e("CircleService", "Error getting circle members", e)
             e.printStackTrace()
             emptyList()
         }
