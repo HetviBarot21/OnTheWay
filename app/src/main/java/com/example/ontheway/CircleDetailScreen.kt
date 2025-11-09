@@ -2,6 +2,8 @@ package com.example.ontheway
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,15 +19,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.ontheway.models.Circle
 import com.example.ontheway.models.CircleMember
 import com.example.ontheway.services.CircleService
+import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.locationcomponent.location
-import com.mapbox.geojson.Point
+import com.example.ontheway.utils.getContactEmail
+import com.example.ontheway.utils.getContactPhone
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -40,11 +45,18 @@ fun CircleDetailScreen(
     val circleService = remember { CircleService() }
     
     var members by remember { mutableStateOf(listOf<CircleMember>()) }
+    var circle by remember { mutableStateOf<Circle?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var showMembersList by remember { mutableStateOf(false) }
+    var showInviteDialog by remember { mutableStateOf(false) }
 
-    // Refresh members every 10 seconds
+    // Load circle info and refresh members every 10 seconds
     LaunchedEffect(circleId) {
+        // Load circle info once
+        val circles = circleService.getUserCircles()
+        circle = circles.find { it.circleId == circleId }
+        
+        // Refresh members periodically
         while (true) {
             members = circleService.getCircleMembers(circleId)
             isLoading = false
@@ -62,6 +74,9 @@ fun CircleDetailScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showInviteDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Invite")
+                    }
                     IconButton(onClick = { showMembersList = !showMembersList }) {
                         Icon(
                             if (showMembersList) Icons.Default.Place else Icons.Default.List,
@@ -93,6 +108,22 @@ fun CircleDetailScreen(
                 }
             }
         }
+    }
+    
+    // Show invite dialog
+    if (showInviteDialog && circle != null) {
+        InviteToCircleDialog(
+            circle = circle!!,
+            onDismiss = { showInviteDialog = false },
+            onInvite = { phoneOrEmail ->
+                scope.launch {
+                    val success = circleService.inviteUserToCircle(circleId, phoneOrEmail)
+                    if (success) {
+                        showInviteDialog = false
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -289,3 +320,165 @@ fun formatTimestamp(timestamp: Long): String {
         else -> "${hours / 24} days ago"
     }
 }
+
+@Composable
+fun InviteToCircleDialog(
+    circle: Circle,
+    onDismiss: () -> Unit,
+    onInvite: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var phoneOrEmail by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+    var showShareOptions by remember { mutableStateOf(false) }
+    
+    val contactPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact(),
+        onResult = { uri ->
+            uri?.let {
+                // Try to get phone number first, then email
+                val phone = getContactPhone(context, it)
+                val email = getContactEmail(context, it)
+                phoneOrEmail = phone ?: email ?: ""
+                if (phoneOrEmail.isEmpty()) {
+                    errorMessage = "No phone or email found for this contact"
+                }
+            }
+        }
+    )
+    
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            if (granted) {
+                contactPickerLauncher.launch(null)
+            } else {
+                errorMessage = "Contacts permission denied"
+            }
+        }
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Invite to ${circle.name}") },
+        text = {
+            Column {
+                Text(
+                    text = "Invite code: ${circle.inviteCode}",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                Text(
+                    text = "Select a contact or enter phone/email",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = phoneOrEmail,
+                        onValueChange = {
+                            phoneOrEmail = it
+                            errorMessage = ""
+                        },
+                        label = { Text("Phone or Email") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        isError = errorMessage.isNotEmpty(),
+                        placeholder = { Text("+1234567890 or email@example.com") }
+                    )
+                    
+                    IconButton(
+                        onClick = {
+                            val hasPermission = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.READ_CONTACTS
+                            ) == PackageManager.PERMISSION_GRANTED
+                            
+                            if (hasPermission) {
+                                contactPickerLauncher.launch(null)
+                            } else {
+                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = "Pick from contacts",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                
+                if (errorMessage.isNotEmpty()) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = { showShareOptions = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Share Invite Link")
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    when {
+                        phoneOrEmail.isBlank() -> {
+                            errorMessage = "Please enter phone or email"
+                        }
+                        else -> {
+                            onInvite(phoneOrEmail.trim())
+                        }
+                    }
+                },
+                enabled = phoneOrEmail.isNotBlank()
+            ) {
+                Text("Send Invite")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+    
+    // Share invite link
+    if (showShareOptions) {
+        val inviteMessage = "Join my circle '${circle.name}' on OnTheWay!\n\n" +
+                "Use invite code: ${circle.inviteCode}\n\n" +
+                "Download the app and enter this code to join."
+        
+        val sendIntent = android.content.Intent().apply {
+            action = android.content.Intent.ACTION_SEND
+            putExtra(android.content.Intent.EXTRA_TEXT, inviteMessage)
+            type = "text/plain"
+        }
+        
+        val shareIntent = android.content.Intent.createChooser(sendIntent, "Share invite via")
+        context.startActivity(shareIntent)
+        showShareOptions = false
+    }
+}
+
+

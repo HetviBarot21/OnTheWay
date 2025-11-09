@@ -262,6 +262,49 @@ class CircleService {
         }
     }
 
+    // Delete circle (only creator can delete)
+    suspend fun deleteCircle(circleId: String): Boolean {
+        val userId = auth.currentUser?.uid ?: return false
+        
+        return try {
+            val circle = firestore.collection("circles")
+                .document(circleId)
+                .get()
+                .await()
+                .toObject(Circle::class.java) ?: return false
+            
+            // Check if user is the creator
+            if (circle.createdBy != userId) {
+                return false
+            }
+            
+            // Delete the circle
+            firestore.collection("circles")
+                .document(circleId)
+                .delete()
+                .await()
+            
+            // Clean up location updates for this circle
+            for (memberId in circle.members) {
+                try {
+                    firestore.collection("locations")
+                        .document(memberId)
+                        .collection("updates")
+                        .document(circleId)
+                        .delete()
+                        .await()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     // Update location for all circles
     suspend fun updateLocationForCircles(latitude: Double, longitude: Double, speed: Float, accuracy: Float) {
         val userId = auth.currentUser?.uid ?: return

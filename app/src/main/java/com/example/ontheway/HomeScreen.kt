@@ -6,12 +6,13 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,9 +23,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.ontheway.models.CircleMember
+import com.example.ontheway.services.CircleService
+import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
+import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.locationcomponent.location
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,18 +45,18 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var hasLocationPermission by remember { mutableStateOf(false) }
-    var showAddContactDialog by remember { mutableStateOf(false) }
-    var contacts by remember { mutableStateOf(listOf<ContactDisplay>()) }
-    
+    val circleService = remember { CircleService() }
     val locationService = remember { LocationService(context) }
+    
+    var hasLocationPermission by remember { mutableStateOf(false) }
+    var allMembers by remember { mutableStateOf(listOf<CircleMember>()) }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted ->
-            hasLocationPermission = granted
-            if (granted) {
-                try {
+            try {
+                hasLocationPermission = granted
+                if (granted) {
                     locationService.startLocationUpdates { location ->
                         scope.launch {
                             try {
@@ -58,40 +66,25 @@ fun HomeScreen(
                             }
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
-            }
-        }
-    )
-    
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            if (granted) {
-                // Permission granted
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     )
 
+    // Load all members from all circles and refresh every 10 seconds
     LaunchedEffect(Unit) {
         try {
-            // Create notification channel
-            NotificationHelper.createNotificationChannel(context)
+            // Check location permission
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
             
-            // Request notification permission for Android 13+
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                val notificationGranted = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) == PackageManager.PERMISSION_GRANTED
-                
-                if (!notificationGranted) {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            }
+            hasLocationPermission = granted
             
-            // Get and save FCM token
+            // Get FCM token
             try {
                 val fcmToken = NotificationHelper.getFCMToken()
                 if (fcmToken != null) {
@@ -101,20 +94,18 @@ fun HomeScreen(
                 e.printStackTrace()
             }
             
-            // Check location permission (don't request, just check)
-            val granted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            
-            hasLocationPermission = granted
-            
-            // Load contacts
-            try {
-                val loadedContacts = locationService.getContacts()
-                contacts = loadedContacts.map { ContactDisplay(it.email, it.destinationLat, it.destinationLng) }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            // Refresh members from all circles periodically
+            while (true) {
+                val circles = circleService.getUserCircles()
+                val members = mutableListOf<CircleMember>()
+                
+                for (circle in circles) {
+                    val circleMembers = circleService.getCircleMembers(circle.circleId)
+                    members.addAll(circleMembers)
+                }
+                
+                allMembers = members.distinctBy { it.userId }
+                delay(10000) // 10 seconds
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -152,7 +143,7 @@ fun HomeScreen(
                 title = { Text("OnTheWay") },
                 actions = {
                     IconButton(onClick = onNavigateToCircles) {
-                        Icon(Icons.Default.Person, contentDescription = "Circles")
+                        Icon(Icons.Default.Add, contentDescription = "Manage Circles")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
@@ -163,134 +154,91 @@ fun HomeScreen(
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddContactDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Contact")
-            }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // Map takes 70% of screen
-            Box(
+        if (hasLocationPermission) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.7f)
+                    .fillMaxSize()
+                    .padding(padding)
             ) {
-                if (hasLocationPermission) {
-                    MapboxMap()
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(24.dp)
-                        ) {
-                            Text(
-                                text = "Location Permission Required",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "We need your location to track your journey",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = {
-                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                            }) {
-                                Text("Grant Permission")
+                // Map takes 60% of screen
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.6f)
+                ) {
+                    AllMembersMap(members = allMembers)
+                }
+                
+                // Members list takes remaining 40%
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp
+                ) {
+                    MembersList(
+                        members = allMembers,
+                        onShareRide = { member ->
+                            scope.launch {
+                                try {
+                                    // Share ride with this member - use their location as destination
+                                    locationService.addContact(
+                                        member.email,
+                                        member.latitude,
+                                        member.longitude
+                                    )
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
                             }
                         }
-                    }
+                    )
                 }
             }
-
-            // Contacts list takes remaining 30%
-            Surface(
+        } else {
+            // Permission request UI
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(24.dp)
                 ) {
                     Text(
-                        text = "Sharing Location With",
+                        text = "Location Permission Required",
                         fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        fontWeight = FontWeight.Bold
                     )
-
-                    if (contacts.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "No contacts added yet.\nTap + to add contacts.",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "We need your location to share with your circles",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = {
+                        try {
+                            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(contacts) { contact ->
-                                ContactItem(
-                                    contact = contact.email,
-                                    onRemove = {
-                                        scope.launch {
-                                            locationService.removeContact(contact.email)
-                                            contacts = contacts.filter { it.email != contact.email }
-                                        }
-                                    }
-                                )
-                            }
-                        }
+                    }) {
+                        Text("Grant Permission")
                     }
                 }
             }
         }
-    }
-
-    if (showAddContactDialog) {
-        AddContactWithDestinationDialog(
-            onDismiss = { showAddContactDialog = false },
-            onAdd = { email, lat, lng ->
-                scope.launch {
-                    locationService.addContact(email, lat, lng)
-                    contacts = contacts + ContactDisplay(email, lat, lng)
-                }
-                showAddContactDialog = false
-            }
-        )
     }
 }
 
-data class ContactDisplay(
-    val email: String,
-    val destinationLat: Double,
-    val destinationLng: Double
-)
-
 @Composable
-fun MapboxMap() {
+fun AllMembersMap(members: List<CircleMember>) {
     val context = LocalContext.current
     var mapView by remember { mutableStateOf<MapView?>(null) }
     
@@ -308,7 +256,7 @@ fun MapboxMap() {
                 try {
                     mv.getMapboxMap().loadStyle(Style.MAPBOX_STREETS) { style ->
                         try {
-                            // Only enable location if permission is granted
+                            // Enable user location
                             if (ContextCompat.checkSelfPermission(
                                     ctx,
                                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -320,6 +268,18 @@ fun MapboxMap() {
                                     this.pulsingEnabled = true
                                 }
                             }
+                            
+                            // Add markers for all active members
+                            val annotationApi = mv.annotations
+                            val pointAnnotationManager = annotationApi.createPointAnnotationManager()
+                            
+                            members.filter { it.isActive }.forEach { member ->
+                                val pointAnnotationOptions = PointAnnotationOptions()
+                                    .withPoint(Point.fromLngLat(member.longitude, member.latitude))
+                                    .withTextField(member.name)
+                                
+                                pointAnnotationManager.create(pointAnnotationOptions)
+                            }
                         } catch (e: Exception) {
                             e.printStackTrace()
                         }
@@ -330,23 +290,88 @@ fun MapboxMap() {
             }
         },
         update = { mv ->
-            // Handle updates if needed
+            // Update markers when members change
+            try {
+                val annotationApi = mv.annotations
+                val pointAnnotationManager = annotationApi.createPointAnnotationManager()
+                pointAnnotationManager.deleteAll()
+                
+                members.filter { it.isActive }.forEach { member ->
+                    val pointAnnotationOptions = PointAnnotationOptions()
+                        .withPoint(Point.fromLngLat(member.longitude, member.latitude))
+                        .withTextField(member.name)
+                    
+                    pointAnnotationManager.create(pointAnnotationOptions)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     )
 }
 
 @Composable
-fun ContactItem(contact: String, onRemove: () -> Unit) {
+fun MembersList(
+    members: List<CircleMember>,
+    onShareRide: (CircleMember) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Circle Members",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        
+        if (members.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No members yet.\nJoin or create a circle to get started.",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(members.size) { index ->
+                    MemberCard(
+                        member = members[index],
+                        onShareRide = { onShareRide(members[index]) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MemberCard(
+    member: CircleMember,
+    onShareRide: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = if (member.isActive)
+                MaterialTheme.colorScheme.surfaceVariant
+            else
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -355,173 +380,54 @@ fun ContactItem(contact: String, onRemove: () -> Unit) {
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(
-                    Icons.Default.Person,
+                    if (member.isActive) Icons.Default.LocationOn else Icons.Default.LocationOff,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = if (member.isActive)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = contact,
-                    fontSize = 16.sp
-                )
-            }
-            TextButton(onClick = onRemove) {
-                Text("Remove", color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-@Composable
-fun AddContactWithDestinationDialog(
-    onDismiss: () -> Unit,
-    onAdd: (String, Double, Double) -> Unit
-) {
-    val context = LocalContext.current
-    var email by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf("") }
-    
-    val contactPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickContact(),
-        onResult = { uri ->
-            uri?.let {
-                val contactEmail = getContactEmail(context, it)
-                if (contactEmail != null) {
-                    email = contactEmail
-                    errorMessage = ""
-                } else {
-                    errorMessage = "No email found for this contact"
-                }
-            }
-        }
-    )
-    
-    val contactsPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            if (granted) {
-                contactPickerLauncher.launch(null)
-            } else {
-                errorMessage = "Contacts permission denied"
-            }
-        }
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Share Location With") },
-        text = {
-            Column {
-                Text(
-                    text = "Select a contact or enter email to share your location",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = {
-                            email = it
-                            errorMessage = ""
-                        },
-                        label = { Text("Email") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        isError = errorMessage.isNotEmpty()
+                Column {
+                    Text(
+                        text = member.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    
-                    IconButton(
-                        onClick = {
-                            val hasPermission = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.READ_CONTACTS
-                            ) == PackageManager.PERMISSION_GRANTED
-                            
-                            if (hasPermission) {
-                                contactPickerLauncher.launch(null)
-                            } else {
-                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                            }
-                        },
-                        modifier = Modifier.align(Alignment.CenterVertically)
-                    ) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = "Pick from contacts",
-                            tint = MaterialTheme.colorScheme.primary
+                    if (member.isActive) {
+                        Text(
+                            text = "Active now",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text(
+                            text = "Offline",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                
-                if (errorMessage.isNotEmpty()) {
-                    Text(
-                        text = errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+            }
+            
+            if (member.isActive) {
+                Button(
+                    onClick = onShareRide,
+                    modifier = Modifier.height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
                     )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Share Ride", fontSize = 12.sp)
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    when {
-                        email.isBlank() -> {
-                            errorMessage = "Email cannot be empty"
-                        }
-                        !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
-                            errorMessage = "Invalid email format"
-                        }
-                        else -> {
-                            // No destination needed - just add contact with dummy coordinates
-                            onAdd(email.trim(), 0.0, 0.0)
-                        }
-                    }
-                }
-            ) {
-                Text("Add")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
-    )
+    }
 }
 
-fun getContactEmail(context: Context, contactUri: android.net.Uri): String? {
-    val projection = arrayOf(
-        android.provider.ContactsContract.CommonDataKinds.Email.ADDRESS
-    )
-    
-    try {
-        context.contentResolver.query(
-            android.provider.ContactsContract.CommonDataKinds.Email.CONTENT_URI,
-            projection,
-            "${android.provider.ContactsContract.CommonDataKinds.Email.CONTACT_ID} = ?",
-            arrayOf(contactUri.lastPathSegment),
-            null
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val emailIndex = cursor.getColumnIndex(
-                    android.provider.ContactsContract.CommonDataKinds.Email.ADDRESS
-                )
-                if (emailIndex >= 0) {
-                    return cursor.getString(emailIndex)
-                }
-            }
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
-    
-    return null
-}
+

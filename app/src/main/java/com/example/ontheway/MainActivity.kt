@@ -19,23 +19,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Initialize Firebase
+
         try {
+            // Initialize Firebase
             FirebaseApp.initializeApp(this)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        
-        setContent {
-            OnTheWayTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AppNavigation()
+
+            setContent {
+                OnTheWayTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AppNavigation()
+                    }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -134,17 +134,17 @@ class MainActivity : ComponentActivity() {
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
+
                 Text(
                     text = "Your journey starts here",
                     fontSize = 18.sp,
                     color = MaterialTheme.colorScheme.onBackground
                 )
-                
+
                 Spacer(modifier = Modifier.height(48.dp))
-                
+
                 Button(
                     onClick = onGetStarted,
                     modifier = Modifier
