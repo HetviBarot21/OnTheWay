@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,7 +45,8 @@ fun HomeScreen(
     userEmail: String,
     onLogout: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToCircles: () -> Unit = {}
+    onNavigateToCircles: () -> Unit = {},
+    onNavigateToSOS: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -145,6 +147,14 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("OnTheWay") },
                 actions = {
+                    IconButton(
+                        onClick = onNavigateToSOS,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = "Emergency SOS")
+                    }
                     IconButton(onClick = onNavigateToCircles) {
                         Icon(Icons.Default.Add, contentDescription = "Manage Circles")
                     }

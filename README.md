@@ -22,6 +22,7 @@ A real-time location sharing app similar to Life360, built with Kotlin, Jetpack 
 - 🗺️ **Dual View** - Toggle between map and list view
 - 📍 **Geofence Zones** - 100m radius with enter/exit detection
 - ⚡ **Real-time Sync** - Firestore for instant updates
+- 🚨 **Emergency SOS** - One-tap emergency alert with 15-second countdown
 
 ## 📱 Screenshots
 
@@ -253,13 +254,36 @@ notifications/
 - Clean up old geofences
 - Use pagination for large circles
 
+## 🚨 Emergency SOS Feature
+
+The app includes a dedicated SOS feature for emergencies:
+
+### How it works:
+1. Tap the red warning icon in the top bar to access SOS
+2. Press the large red SOS button to activate
+3. A 15-second countdown begins - tap again to cancel
+4. If not cancelled, the app will:
+   - Send SMS alerts to all emergency contacts
+   - Include your current location (Google Maps link)
+   - Automatically call the first emergency contact
+
+### Setup:
+1. Go to SOS screen
+2. Tap "Manage Contacts"
+3. Add emergency phone numbers (e.g., +1234567890)
+4. Grant SMS and Call permissions when prompted
+
+### Permissions Required:
+- SEND_SMS - To send emergency text messages
+- CALL_PHONE - To automatically call emergency contacts
+- ACCESS_FINE_LOCATION - To include location in SOS message
+
 ## 🚀 Future Enhancements
 
 - [ ] Driving mode detection
 - [ ] Route display on map
 - [ ] Location history playback
 - [ ] Custom geofence zones (home, work, school)
-- [ ] Emergency SOS feature
 - [ ] Place recommendations
 - [ ] Chat within circles
 - [ ] Location sharing time limits

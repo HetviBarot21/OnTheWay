@@ -48,6 +48,9 @@ class MainActivity : ComponentActivity() {
         var selectedCircleId by remember { mutableStateOf<String?>(null) }
 
         when (currentScreen) {
+            "sos" -> SOSScreen(
+                onBack = { currentScreen = "home" }
+            )
             "landing" -> LandingPage(
                 onGetStarted = { currentScreen = "login" }
             )
@@ -76,7 +79,8 @@ class MainActivity : ComponentActivity() {
                         currentScreen = "landing"
                     },
                     onNavigateToSettings = { currentScreen = "settings" },
-                    onNavigateToCircles = { currentScreen = "circles" }
+                    onNavigateToCircles = { currentScreen = "circles" },
+                    onNavigateToSOS = { currentScreen = "sos" }
                 )
             }
             "settings" -> {
