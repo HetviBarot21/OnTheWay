@@ -350,6 +350,27 @@ class CircleService {
         val userId = auth.currentUser?.uid ?: return
         val circles = getUserCircles()
         
+        // Also update online status when updating location
+        try {
+            val onlineStatus = mapOf(
+                "userId" to userId,
+                "isOnline" to true,
+                "lastSeen" to System.currentTimeMillis(),
+                "connectionType" to "active"
+            )
+            
+            firestore.collection("users")
+                .document(userId)
+                .collection("status")
+                .document("online")
+                .set(onlineStatus)
+                .await()
+                
+            Log.d("CircleService", "Updated online status with location")
+        } catch (e: Exception) {
+            Log.e("CircleService", "Error updating online status", e)
+        }
+        
         for (circle in circles) {
             val locationUpdate = LocationUpdate(
                 userId = userId,

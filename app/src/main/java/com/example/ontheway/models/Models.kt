@@ -30,7 +30,9 @@ data class CircleMember(
     val longitude: Double = 0.0,
     val lastUpdated: Long = 0L,
     val isActive: Boolean = false,
+    val isOnline: Boolean = false,
     val isSharingTrip: Boolean = false,
+    val activeTrip: Trip? = null,
     val tripDestinationLat: Double? = null,
     val tripDestinationLng: Double? = null,
     val eta: Int? = null
@@ -61,6 +63,7 @@ data class CircleInvite(
 data class Trip(
     val tripId: String = "",
     val userId: String = "",
+    val userName: String = "",
     val circleId: String = "",
     val startLat: Double = 0.0,
     val startLng: Double = 0.0,
@@ -70,7 +73,14 @@ data class Trip(
     val startTime: Long = 0L,
     val endTime: Long? = null,
     val isActive: Boolean = true,
-    val sharedWith: List<String> = emptyList() // User IDs
+    val sharedWith: List<String> = emptyList(), // User IDs
+    val currentLat: Double = 0.0,
+    val currentLng: Double = 0.0,
+    val currentSpeed: Float = 0f,
+    val lastUpdated: Long = 0L,
+    val notified2Min: Boolean = false,
+    val notifiedArrival: Boolean = false,
+    val eta: Int? = null
 )
 
 data class Geofence(
@@ -82,4 +92,11 @@ data class Geofence(
     val radius: Float = 100f, // meters
     val type: String = "custom", // home, work, school, custom
     val createdAt: Long = 0L
+)
+
+data class OnlineStatus(
+    val userId: String = "",
+    val isOnline: Boolean = false,
+    val lastSeen: Long = 0L,
+    val connectionType: String = "" // "wifi", "cellular", "offline"
 )

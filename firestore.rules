@@ -32,6 +32,19 @@ service cloud.firestore {
       match /invites/{inviteId} {
         allow read, write: if isOwner(userId);
       }
+      
+      // User online status subcollection
+      match /status/{statusDoc} {
+        // Anyone authenticated can read status (for circle members)
+        allow read: if isAuthenticated();
+        // Only the user can write their own status
+        allow write: if isOwner(userId);
+      }
+      
+      // User contacts subcollection
+      match /contacts/{contactId} {
+        allow read, write: if isOwner(userId);
+      }
     }
     
     // Circles collection - stores circle data with invite codes

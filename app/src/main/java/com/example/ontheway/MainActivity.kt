@@ -11,11 +11,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ontheway.services.OnlineStatusManager
 import com.example.ontheway.ui.theme.OnTheWayTheme
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    
+    private val onlineStatusManager by lazy { OnlineStatusManager(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +43,34 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Start heartbeat when app comes to foreground
+        if (FirebaseAuth.getInstance().currentUser != null) {
+            android.util.Log.d("MainActivity", "User logged in, starting heartbeat")
+            onlineStatusManager.startHeartbeat()
+            
+            // Also set status immediately
+            CoroutineScope(Dispatchers.IO).launch {
+                onlineStatusManager.setOnlineStatus(true)
+                android.util.Log.d("MainActivity", "Set online status to true")
+            }
+        }
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        // Stop heartbeat when app goes to background
+        onlineStatusManager.stopHeartbeat()
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up
+        onlineStatusManager.stopHeartbeat()
+        onlineStatusManager.stopObserving()
     }
 
     @Composable

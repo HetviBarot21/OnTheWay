@@ -14,6 +14,10 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -250,11 +254,50 @@ fun HomeScreen(
     }
 }
 
+// Helper function to create circular marker with initial
+fun createCircularMarker(initial: String, color: Int = android.graphics.Color.parseColor("#6200EE")): Bitmap {
+    val size = 120
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    
+    // Draw circle background
+    val circlePaint = Paint().apply {
+        this.color = color
+        isAntiAlias = true
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f, circlePaint)
+    
+    // Draw white border
+    val borderPaint = Paint().apply {
+        this.color = android.graphics.Color.WHITE
+        isAntiAlias = true
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
+    }
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, borderPaint)
+    
+    // Draw initial text
+    val textPaint = Paint().apply {
+        this.color = android.graphics.Color.WHITE
+        isAntiAlias = true
+        textSize = 60f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    
+    val textY = size / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
+    canvas.drawText(initial, size / 2f, textY, textPaint)
+    
+    return bitmap
+}
+
 @Composable
 fun AllMembersMap(members: List<CircleMember>) {
     val context = LocalContext.current
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var hasSetInitialCamera by remember { mutableStateOf(false) }
+    var pointAnnotationManager by remember { mutableStateOf<com.mapbox.maps.plugin.annotation.generated.PointAnnotationManager?>(null) }
     
     DisposableEffect(Unit) {
         onDispose {
@@ -302,14 +345,20 @@ fun AllMembersMap(members: List<CircleMember>) {
                             
                             // Add markers for all active members
                             val annotationApi = mv.annotations
-                            val pointAnnotationManager = annotationApi.createPointAnnotationManager()
+                            pointAnnotationManager = annotationApi.createPointAnnotationManager()
                             
                             members.filter { it.isActive }.forEach { member ->
+                                // Get first initial of first name
+                                val initial = member.name.firstOrNull()?.uppercase() ?: "?"
+                                
+                                // Create circular marker bitmap
+                                val markerBitmap = createCircularMarker(initial)
+                                
                                 val pointAnnotationOptions = PointAnnotationOptions()
                                     .withPoint(Point.fromLngLat(member.longitude, member.latitude))
-                                    .withTextField(member.name)
+                                    .withIconImage(markerBitmap)
                                 
-                                pointAnnotationManager.create(pointAnnotationOptions)
+                                pointAnnotationManager?.create(pointAnnotationOptions)
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -323,16 +372,21 @@ fun AllMembersMap(members: List<CircleMember>) {
         update = { mv ->
             // Update markers when members change
             try {
-                val annotationApi = mv.annotations
-                val pointAnnotationManager = annotationApi.createPointAnnotationManager()
-                pointAnnotationManager.deleteAll()
+                // Reuse existing annotation manager to avoid duplicates
+                pointAnnotationManager?.deleteAll()
                 
                 members.filter { it.isActive }.forEach { member ->
+                    // Get first initial of first name
+                    val initial = member.name.firstOrNull()?.uppercase() ?: "?"
+                    
+                    // Create circular marker bitmap
+                    val markerBitmap = createCircularMarker(initial)
+                    
                     val pointAnnotationOptions = PointAnnotationOptions()
                         .withPoint(Point.fromLngLat(member.longitude, member.latitude))
-                        .withTextField(member.name)
+                        .withIconImage(markerBitmap)
                     
-                    pointAnnotationManager.create(pointAnnotationOptions)
+                    pointAnnotationManager?.create(pointAnnotationOptions)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
