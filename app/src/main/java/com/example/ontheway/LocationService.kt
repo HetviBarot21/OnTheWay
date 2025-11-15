@@ -67,13 +67,19 @@ class LocationService(private val context: Context) {
             10000L // 10 seconds
         ).apply {
             setMinUpdateIntervalMillis(5000L) // 5 seconds
+            setMaxUpdateDelayMillis(2000L) // Max 2 second delay
+            setMinUpdateDistanceMeters(5f) // Only update if moved 5 meters
+            setWaitForAccurateLocation(true) // Wait for accurate location
         }.build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
-                    onLocationUpdate(location)
-                    updateLocationInFirestore(location)
+                    // Only use location if accuracy is good (< 50 meters)
+                    if (location.accuracy < 50f) {
+                        onLocationUpdate(location)
+                        updateLocationInFirestore(location)
+                    }
                     
                     // Update location for all circles
                     CoroutineScope(Dispatchers.IO).launch {

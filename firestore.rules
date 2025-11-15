@@ -115,5 +115,11 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated() && 
                                request.auth.uid == resource.data.userId;
     }
+    
+    // SOS events collection
+    match /sos_events/{eventId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
   }
 }

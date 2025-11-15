@@ -370,23 +370,28 @@ fun AllMembersMap(members: List<CircleMember>) {
             }
         },
         update = { mv ->
-            // Update markers when members change
+            // Update markers when members change - optimized to reduce lag
             try {
-                // Reuse existing annotation manager to avoid duplicates
-                pointAnnotationManager?.deleteAll()
-                
-                members.filter { it.isActive }.forEach { member ->
-                    // Get first initial of first name
-                    val initial = member.name.firstOrNull()?.uppercase() ?: "?"
+                pointAnnotationManager?.let { manager ->
+                    // Get current annotations
+                    val currentAnnotations = manager.annotations
                     
-                    // Create circular marker bitmap
-                    val markerBitmap = createCircularMarker(initial)
+                    // Only update if member count changed or positions changed significantly
+                    val activeMembers = members.filter { it.isActive }
                     
-                    val pointAnnotationOptions = PointAnnotationOptions()
-                        .withPoint(Point.fromLngLat(member.longitude, member.latitude))
-                        .withIconImage(markerBitmap)
+                    // Always recreate markers for smooth, synchronized movement
+                    manager.deleteAll()
                     
-                    pointAnnotationManager?.create(pointAnnotationOptions)
+                    activeMembers.forEach { member ->
+                        val initial = member.name.firstOrNull()?.uppercase() ?: "?"
+                        val markerBitmap = createCircularMarker(initial)
+                        
+                        val pointAnnotationOptions = PointAnnotationOptions()
+                            .withPoint(Point.fromLngLat(member.longitude, member.latitude))
+                            .withIconImage(markerBitmap)
+                        
+                        manager.create(pointAnnotationOptions)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

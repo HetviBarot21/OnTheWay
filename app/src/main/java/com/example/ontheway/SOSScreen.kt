@@ -1,5 +1,7 @@
 package com.example.ontheway
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -9,17 +11,34 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.example.ontheway.services.CircleService
+import com.google.android.gms.location.LocationServices
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SOSScreen(
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val auth = FirebaseAuth.getInstance()
+    val firestore = FirebaseFirestore.getInstance()
+    val circleService = remember { CircleService() }
+    
     var showCountdown by remember { mutableStateOf(false) }
     var countdown by remember { mutableStateOf(15) }
+    var isSending by remember { mutableStateOf(false) }
+    var sosTriggered by remember { mutableStateOf(false) }
+    var sosError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -134,20 +153,159 @@ fun SOSScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("1. Press the SOS button")
                     Text("2. 15-second countdown begins")
-                    Text("3. Emergency contacts will be notified")
+                    Text("3. All circle members will be notified")
                     Text("4. Your location will be shared")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Note: This is a basic implementation. Full SOS features coming soon.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
     }
+    
+    // Show success dialog
+    if (sosTriggered) {
+        AlertDialog(
+            onDismissRequest = { sosTriggered = false },
+            title = { Text("🚨 SOS Alert Sent!") },
+            text = { 
+                Text("Emergency alert has been sent to all your circle members with your current location.")
+            },
+            confirmButton = {
+                Button(onClick = { 
+                    sosTriggered = false
+                    onBack()
+                }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+    
+    // Show error dialog
+    if (sosError != null) {
+        AlertDialog(
+            onDismissRequest = { sosError = null },
+            title = { Text("Error") },
+            text = { Text(sosError ?: "Unknown error") },
+            confirmButton = {
+                Button(onClick = { sosError = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+    
+    // Show loading
+    if (isSending) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Sending SOS...") },
+            text = { 
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Alerting your circle members...")
+                }
+            },
+            confirmButton = { }
+        )
+    }
 
-    var sosTriggered by remember { mutableStateOf(false) }
+    // Function to send SOS alerts
+    suspend fun sendSOSAlerts() {
+        isSending = true
+        try {
+            val userId = auth.currentUser?.uid ?: throw Exception("Not authenticated")
+            val userName = auth.currentUser?.displayName ?: auth.currentUser?.email ?: "Someone"
+            
+            // Get current location
+            val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+            
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
+                != PackageManager.PERMISSION_GRANTED) {
+                throw Exception("Location permission not granted")
+            }
+            
+            val location = fusedLocationClient.lastLocation.await()
+            if (location == null) {
+                throw Exception("Could not get current location")
+            }
+            
+            val latitude = location.latitude
+            val longitude = location.longitude
+            val mapsLink = "https://maps.google.com/?q=$latitude,$longitude"
+            
+            // Get all circles user is in
+            val circles = circleService.getUserCircles()
+            
+            if (circles.isEmpty()) {
+                throw Exception("You are not in any circles")
+            }
+            
+            // Send notification to all circle members
+            var notificationsSent = 0
+            for (circle in circles) {
+                for (memberId in circle.members) {
+                    if (memberId != userId) { // Don't send to yourself
+                        try {
+                            // Get member's FCM token
+                            val memberDoc = firestore.collection("users")
+                                .document(memberId)
+                                .get()
+                                .await()
+                            
+                            val fcmToken = memberDoc.getString("fcmToken")
+                            
+                            if (fcmToken != null) {
+                                // Create notification document
+                                val notification = hashMapOf(
+                                    "token" to fcmToken,
+                                    "type" to "sos",
+                                    "from" to userName,
+                                    "fromUserId" to userId,
+                                    "latitude" to latitude,
+                                    "longitude" to longitude,
+                                    "mapsLink" to mapsLink,
+                                    "timestamp" to System.currentTimeMillis(),
+                                    "title" to "🚨 EMERGENCY SOS",
+                                    "body" to "$userName needs help! Tap to see location."
+                                )
+                                
+                                firestore.collection("notifications")
+                                    .add(notification)
+                                    .await()
+                                
+                                notificationsSent++
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("SOSScreen", "Error sending to $memberId", e)
+                        }
+                    }
+                }
+            }
+            
+            // Store SOS event
+            val sosEvent = hashMapOf(
+                "userId" to userId,
+                "userName" to userName,
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "timestamp" to System.currentTimeMillis(),
+                "notificationsSent" to notificationsSent
+            )
+            
+            firestore.collection("sos_events")
+                .add(sosEvent)
+                .await()
+            
+            sosTriggered = true
+            android.util.Log.d("SOSScreen", "SOS sent to $notificationsSent members")
+            
+        } catch (e: Exception) {
+            android.util.Log.e("SOSScreen", "Error sending SOS", e)
+            sosError = e.message
+        } finally {
+            isSending = false
+        }
+    }
 
     // Countdown effect
     LaunchedEffect(showCountdown, countdown) {
@@ -155,10 +313,10 @@ fun SOSScreen(
             kotlinx.coroutines.delay(1000)
             countdown--
         } else if (showCountdown && countdown == 0) {
-            // SOS triggered!
-            sosTriggered = true
+            // SOS triggered - send alerts!
             showCountdown = false
             countdown = 15
+            sendSOSAlerts()
         }
     }
     
