@@ -20,7 +20,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         remoteMessage.notification?.let {
             showNotification(
                 title = it.title ?: "OnTheWay",
-                message = it.body ?: ""
+                message = it.body ?: "",
+                isHighPriority = false
             )
         }
         
@@ -28,18 +29,35 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             val type = data["type"]
             val from = data["from"]
             val eta = data["eta"]
+            val latitude = data["latitude"]
+            val longitude = data["longitude"]
             
             when (type) {
+                "sos" -> {
+                    // High priority SOS notification
+                    val mapsLink = if (latitude != null && longitude != null) {
+                        "https://maps.google.com/?q=$latitude,$longitude"
+                    } else null
+                    
+                    showNotification(
+                        title = "🚨 EMERGENCY SOS",
+                        message = "$from needs help! ${if (mapsLink != null) "Tap to see location." else ""}",
+                        isHighPriority = true,
+                        actionUrl = mapsLink
+                    )
+                }
                 "2_minutes" -> {
                     showNotification(
                         title = "Almost There!",
-                        message = "$from is 2 minutes away (ETA: $eta min)"
+                        message = "$from is 2 minutes away (ETA: $eta min)",
+                        isHighPriority = false
                     )
                 }
                 "arrived" -> {
                     showNotification(
                         title = "Arrived!",
-                        message = "$from has arrived at the destination"
+                        message = "$from has arrived at the destination",
+                        isHighPriority = false
                     )
                 }
             }
@@ -56,24 +74,40 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // This will be called from LocationService
     }
     
-    private fun showNotification(title: String, message: String) {
-        val channelId = "ontheway_notifications"
+    private fun showNotification(
+        title: String, 
+        message: String, 
+        isHighPriority: Boolean = false,
+        actionUrl: String? = null
+    ) {
+        val channelId = if (isHighPriority) "ontheway_sos" else "ontheway_notifications"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         
         // Create notification channel for Android O and above
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "OnTheWay Notifications",
-                NotificationManager.IMPORTANCE_HIGH
+                if (isHighPriority) "Emergency SOS" else "OnTheWay Notifications",
+                if (isHighPriority) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Notifications for location sharing updates"
+                description = if (isHighPriority) 
+                    "Emergency SOS alerts from circle members" 
+                else 
+                    "Notifications for location sharing updates"
+                if (isHighPriority) {
+                    enableVibration(true)
+                    enableLights(true)
+                }
             }
             notificationManager.createNotificationChannel(channel)
         }
         
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        val intent = if (actionUrl != null) {
+            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(actionUrl))
+        } else {
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
         }
         
         val pendingIntent = PendingIntent.getActivity(
@@ -84,12 +118,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         )
         
         val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (isHighPriority) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .apply {
+                if (isHighPriority) {
+                    setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
+                    setCategory(NotificationCompat.CATEGORY_ALARM)
+                }
+            }
             .build()
         
         notificationManager.notify(System.currentTimeMillis().toInt(), notification)

@@ -115,7 +115,34 @@ fun LoginScreen(
             }
         }
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        TextButton(
+            onClick = {
+                if (email.isNotEmpty()) {
+                    scope.launch {
+                        try {
+                            com.google.firebase.auth.FirebaseAuth.getInstance()
+                                .sendPasswordResetEmail(email)
+                                .addOnSuccessListener {
+                                    errorMessage = "Password reset email sent to $email"
+                                }
+                                .addOnFailureListener { e ->
+                                    errorMessage = "Failed to send reset email: ${e.message}"
+                                }
+                        } catch (e: Exception) {
+                            errorMessage = "Error: ${e.message}"
+                        }
+                    }
+                } else {
+                    errorMessage = "Please enter your email first"
+                }
+            }
+        ) {
+            Text(text = "Forgot Password?")
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
         
         TextButton(onClick = onNavigateToSignUp) {
             Text(text = "Don't have an account? Sign Up")

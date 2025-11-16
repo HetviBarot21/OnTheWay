@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OnTheWay Test Route"
+     xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  
+  <metadata>
+    <name>Test Route - Approaching Destination</name>
+    <desc>Simulates driving from 2km away to destination for ETA testing</desc>
+  </metadata>
+  
+  <trk>
+    <name>Approach Route</name>
+    <trkseg>
+      <!-- Starting point: 2km away -->
+      <trkpt lat="37.7749" lon="-122.4194">
+        <ele>10</ele>
+        <time>2024-01-01T12:00:00Z</time>
+      </trkpt>
+      
+      <!-- 1.8km away -->
+      <trkpt lat="37.7764" lon="-122.4179">
+        <ele>10</ele>
+        <time>2024-01-01T12:00:30Z</time>
+      </trkpt>
+      
+      <!-- 1.6km away -->
+      <trkpt lat="37.7779" lon="-122.4164">
+        <ele>10</ele>
+        <time>2024-01-01T12:01:00Z</time>
+      </trkpt>
+      
+      <!-- 1.4km away -->
+      <trkpt lat="37.7794" lon="-122.4149">
+        <ele>10</ele>
+        <time>2024-01-01T12:01:30Z</time>
+      </trkpt>
+      
+      <!-- 1.2km away -->
+      <trkpt lat="37.7809" lon="-122.4134">
+        <ele>10</ele>
+        <time>2024-01-01T12:02:00Z</time>
+      </trkpt>
+      
+      <!-- 1km away -->
+      <trkpt lat="37.7824" lon="-122.4119">
+        <ele>10</ele>
+        <time>2024-01-01T12:02:30Z</time>
+      </trkpt>
+      
+      <!-- 800m away -->
+      <trkpt lat="37.7834" lon="-122.4109">
+        <ele>10</ele>
+        <time>2024-01-01T12:03:00Z</time>
+      </trkpt>
+      
+      <!-- 600m away -->
+      <trkpt lat="37.7839" lon="-122.4104">
+        <ele>10</ele>
+        <time>2024-01-01T12:03:30Z</time>
+      </trkpt>
+      
+      <!-- 400m away - Should trigger "2 minutes away" notification -->
+      <trkpt lat="37.7844" lon="-122.4099">
+        <ele>10</ele>
+        <time>2024-01-01T12:04:00Z</time>
+      </trkpt>
+      
+      <!-- 300m away -->
+      <trkpt lat="37.7846" lon="-122.4097">
+        <ele>10</ele>
+        <time>2024-01-01T12:04:20Z</time>
+      </trkpt>
+      
+      <!-- 200m away -->
+      <trkpt lat="37.7847" lon="-122.4096">
+        <ele>10</ele>
+        <time>2024-01-01T12:04:40Z</time>
+      </trkpt>
+      
+      <!-- 150m away -->
+      <trkpt lat="37.7848" lon="-122.4095">
+        <ele>10</ele>
+        <time>2024-01-01T12:05:00Z</time>
+      </trkpt>
+      
+      <!-- 80m away - Should trigger "Arrived" notification -->
+      <trkpt lat="37.7849" lon="-122.4094">
+        <ele>10</ele>
+        <time>2024-01-01T12:05:20Z</time>
+      </trkpt>
+      
+      <!-- Destination reached -->
+      <trkpt lat="37.7850" lon="-122.4093">
+        <ele>10</ele>
+        <time>2024-01-01T12:05:40Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

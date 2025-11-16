@@ -22,19 +22,21 @@ exports.sendNotification = functions.firestore
             token: data.token,
             notification: {
                 title: getNotificationTitle(data.type, data.from),
-                body: getNotificationBody(data.type, data.from, data.eta || 0)
+                body: getNotificationBody(data.type, data.from, data.eta || 0, data.latitude, data.longitude)
             },
             data: {
                 type: data.type,
                 from: data.from,
                 eta: String(data.eta || 0),
-                timestamp: String(data.timestamp || Date.now())
+                timestamp: String(data.timestamp || Date.now()),
+                latitude: String(data.latitude || ''),
+                longitude: String(data.longitude || '')
             },
             android: {
-                priority: 'high',
+                priority: data.type === 'sos' ? 'max' : 'high',
                 notification: {
                     sound: 'default',
-                    channelId: 'ontheway_notifications'
+                    channelId: data.type === 'sos' ? 'ontheway_sos' : 'ontheway_notifications'
                 }
             }
         };
@@ -62,6 +64,8 @@ exports.sendNotification = functions.firestore
  */
 function getNotificationTitle(type, from) {
     switch (type) {
+        case 'sos':
+            return '🚨 EMERGENCY SOS';
         case '2_minutes':
             return 'Almost There! 🚗';
         case 'arrived':
@@ -78,8 +82,11 @@ function getNotificationTitle(type, from) {
 /**
  * Get notification body based on type
  */
-function getNotificationBody(type, from, eta) {
+function getNotificationBody(type, from, eta, latitude, longitude) {
     switch (type) {
+        case 'sos':
+            const hasLocation = latitude && longitude;
+            return `${from} needs help! ${hasLocation ? 'Tap to see location.' : ''}`;
         case '2_minutes':
             return `${from} is 2 minutes away (ETA: ${eta} min)`;
         case 'arrived':

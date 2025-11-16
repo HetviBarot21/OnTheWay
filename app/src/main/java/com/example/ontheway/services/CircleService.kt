@@ -123,7 +123,9 @@ class CircleService {
                             latitude = location?.latitude ?: 0.0,
                             longitude = location?.longitude ?: 0.0,
                             lastUpdated = location?.timestamp ?: 0L,
-                            isActive = (System.currentTimeMillis() - (location?.timestamp ?: 0L)) < 300000 // 5 minutes
+                            isActive = (System.currentTimeMillis() - (location?.timestamp ?: 0L)) < 300000, // 5 minutes
+                            batteryLevel = location?.batteryLevel ?: 0,
+                            isCharging = location?.isCharging ?: false
                         )
                     )
                 }
@@ -416,4 +418,47 @@ class CircleService {
             .map { chars.random() }
             .joinToString("")
     }
+
+    // Update location for all circles
+    suspend fun updateLocationForCircles(
+        latitude: Double, 
+        longitude: Double, 
+        speed: Float, 
+        accuracy: Float,
+        batteryLevel: Int = 0,
+        isCharging: Boolean = false
+    ) {
+        val userId = auth.currentUser?.uid ?: return
+        val circles = getUserCircles()
+        
+        Log.d("CircleService", "Updating location for ${circles.size} circles")
+        
+        for (circle in circles) {
+            val locationUpdate = LocationUpdate(
+                userId = userId,
+                circleId = circle.circleId,
+                latitude = latitude,
+                longitude = longitude,
+                timestamp = System.currentTimeMillis(),
+                speed = speed,
+                accuracy = accuracy,
+                batteryLevel = batteryLevel,
+                isCharging = isCharging
+            )
+            
+            try {
+                firestore.collection("locations")
+                    .document(userId)
+                    .collection("updates")
+                    .document(circle.circleId)
+                    .set(locationUpdate)
+                    .await()
+                Log.d("CircleService", "Location updated for circle: ${circle.circleId}")
+            } catch (e: Exception) {
+                Log.e("CircleService", "Failed to update location for circle ${circle.circleId}", e)
+                e.printStackTrace()
+            }
+        }
+    }
+
 }

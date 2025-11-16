@@ -4,8 +4,10 @@ import android.Manifest
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.BatteryManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.example.ontheway.services.CircleService
@@ -16,9 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -47,7 +46,6 @@ class LocationService(private val context: Context) {
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
     private val circleService = CircleService()
-    private val httpClient = OkHttpClient()
 
     private var locationCallback: LocationCallback? = null
     private var lastETACheck = 0L
@@ -67,19 +65,26 @@ class LocationService(private val context: Context) {
             10000L // 10 seconds
         ).apply {
             setMinUpdateIntervalMillis(5000L) // 5 seconds
-            setMaxUpdateDelayMillis(2000L) // Max 2 second delay
-            setMinUpdateDistanceMeters(5f) // Only update if moved 5 meters
-            setWaitForAccurateLocation(true) // Wait for accurate location
         }.build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
-                    // Only use location if accuracy is good (< 50 meters)
-                    if (location.accuracy < 50f) {
-                        onLocationUpdate(location)
-                        updateLocationInFirestore(location)
-                    }
+                    onLocationUpdate(location)
+                    updateLocationInFirestore(location)
+                    
+                    // Get battery info
+                    val batteryStatus = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val batteryLevel = batteryStatus?.let {
+                        val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                        val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                        (level * 100 / scale.toFloat()).toInt()
+                    } ?: 0
+                    val isCharging = batteryStatus?.let {
+                        val status = it.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                        status == BatteryManager.BATTERY_STATUS_CHARGING || 
+                        status == BatteryManager.BATTERY_STATUS_FULL
+                    } ?: false
                     
                     // Update location for all circles
                     CoroutineScope(Dispatchers.IO).launch {
@@ -87,7 +92,9 @@ class LocationService(private val context: Context) {
                             location.latitude,
                             location.longitude,
                             location.speed,
-                            location.accuracy
+                            location.accuracy,
+                            batteryLevel,
+                            isCharging
                         )
                         
                         // Check ETA every 30 seconds
@@ -131,7 +138,6 @@ class LocationService(private val context: Context) {
             }
     }
 
-    // Add geofence for a location
     fun addGeofence(
         geofenceId: String,
         latitude: Double,
@@ -175,18 +181,17 @@ class LocationService(private val context: Context) {
 
         geofencingClient.addGeofences(geofencingRequest, pendingIntent)
             .addOnSuccessListener {
-                // Geofence added successfully
+                android.util.Log.d("LocationService", "Geofence added successfully")
             }
             .addOnFailureListener { e ->
                 e.printStackTrace()
             }
     }
 
-    // Remove geofence
     fun removeGeofence(geofenceId: String) {
         geofencingClient.removeGeofences(listOf(geofenceId))
             .addOnSuccessListener {
-                // Geofence removed
+                android.util.Log.d("LocationService", "Geofence removed")
             }
             .addOnFailureListener { e ->
                 e.printStackTrace()
@@ -194,7 +199,12 @@ class LocationService(private val context: Context) {
     }
 
     suspend fun addContact(contactEmail: String, destinationLat: Double, destinationLng: Double) {
-        val userId = auth.currentUser?.uid ?: return
+        val userId = auth.currentUser?.uid ?: run {
+            android.util.Log.e("LocationService", "User not authenticated")
+            return
+        }
+        
+        android.util.Log.d("LocationService", "Adding contact: $contactEmail")
         
         val contact = Contact(
             email = contactEmail,
@@ -204,20 +214,80 @@ class LocationService(private val context: Context) {
             notifiedArrived = false
         )
 
-        firestore.collection("users")
-            .document(userId)
-            .collection("contacts")
-            .document(contactEmail)
-            .set(contact)
-            .await()
-        
-        // Add geofence for destination
-        addGeofence(
-            "contact_$contactEmail",
-            destinationLat,
-            destinationLng,
-            100f
-        )
+        try {
+            // Save to sender's contacts
+            firestore.collection("users")
+                .document(userId)
+                .collection("contacts")
+                .document(contactEmail)
+                .set(contact)
+                .await()
+            
+            android.util.Log.d("LocationService", "Contact saved")
+            
+            // Also create a shared ride document so recipient can see it
+            val recipientUserId = getUserIdByEmail(contactEmail)
+            if (recipientUserId != null) {
+                val rideData = hashMapOf(
+                    "senderId" to userId,
+                    "senderEmail" to (auth.currentUser?.email ?: ""),
+                    "recipientId" to recipientUserId,
+                    "recipientEmail" to contactEmail,
+                    "destinationLat" to destinationLat,
+                    "destinationLng" to destinationLng,
+                    "startTime" to System.currentTimeMillis(),
+                    "active" to true
+                )
+                
+                firestore.collection("activeRides")
+                    .document("${userId}_${recipientUserId}")
+                    .set(rideData)
+                    .await()
+                
+                android.util.Log.d("LocationService", "Active ride created")
+            }
+            
+            addGeofence(
+                "contact_$contactEmail",
+                destinationLat,
+                destinationLng,
+                100f
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("LocationService", "Failed to add contact", e)
+            throw e
+        }
+    }
+    
+    private suspend fun getUserIdByEmail(email: String): String? {
+        return try {
+            // Try to get from circle members first (more reliable)
+            val circles = circleService.getUserCircles()
+            for (circle in circles) {
+                val members = circleService.getCircleMembers(circle.circleId)
+                val member = members.find { it.email == email }
+                if (member != null) {
+                    return member.userId
+                }
+            }
+            
+            // Fallback: try direct query (may fail without index)
+            try {
+                val snapshot = firestore.collection("users")
+                    .whereEqualTo("email", email)
+                    .limit(1)
+                    .get()
+                    .await()
+                
+                snapshot.documents.firstOrNull()?.id
+            } catch (e: Exception) {
+                android.util.Log.w("LocationService", "Direct email query failed, using circle lookup only")
+                null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("LocationService", "Error getting user ID", e)
+            null
+        }
     }
 
     suspend fun removeContact(contactEmail: String) {
@@ -230,8 +300,33 @@ class LocationService(private val context: Context) {
             .delete()
             .await()
         
-        // Remove geofence
+        // Also remove the active ride
+        val recipientUserId = getUserIdByEmail(contactEmail)
+        if (recipientUserId != null) {
+            firestore.collection("activeRides")
+                .document("${userId}_${recipientUserId}")
+                .delete()
+                .await()
+        }
+        
         removeGeofence("contact_$contactEmail")
+    }
+    
+    suspend fun getIncomingRides(): List<Map<String, Any>> {
+        val userId = auth.currentUser?.uid ?: return emptyList()
+        
+        return try {
+            val snapshot = firestore.collection("activeRides")
+                .whereEqualTo("recipientId", userId)
+                .whereEqualTo("active", true)
+                .get()
+                .await()
+            
+            snapshot.documents.mapNotNull { it.data }
+        } catch (e: Exception) {
+            android.util.Log.e("LocationService", "Error getting incoming rides", e)
+            emptyList()
+        }
     }
 
     suspend fun getContacts(): List<Contact> {
@@ -267,149 +362,122 @@ class LocationService(private val context: Context) {
     }
 
     fun calculateETA(distanceMeters: Double, speedMps: Double = 13.89): Int {
-        // Default speed: 13.89 m/s = 50 km/h
         return if (speedMps > 0) {
-            (distanceMeters / speedMps / 60).toInt() // minutes
+            (distanceMeters / speedMps / 60).toInt()
         } else {
             (distanceMeters / 13.89 / 60).toInt()
         }
     }
 
-    // Calculate ETA using Google Distance Matrix API
-    suspend fun calculateETAWithAPI(
-        originLat: Double,
-        originLng: Double,
-        destLat: Double,
-        destLng: Double,
-        apiKey: String
-    ): Int? {
-        return try {
-            val url = "https://maps.googleapis.com/maps/api/distancematrix/json?" +
-                    "origins=$originLat,$originLng" +
-                    "&destinations=$destLat,$destLng" +
-                    "&mode=driving" +
-                    "&key=$apiKey"
-
-            val request = Request.Builder()
-                .url(url)
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val jsonResponse = JSONObject(response.body?.string() ?: "")
-
-            if (jsonResponse.getString("status") == "OK") {
-                val rows = jsonResponse.getJSONArray("rows")
-                val elements = rows.getJSONObject(0).getJSONArray("elements")
-                val element = elements.getJSONObject(0)
-
-                if (element.getString("status") == "OK") {
-                    val duration = element.getJSONObject("duration")
-                    val seconds = duration.getInt("value")
-                    return seconds / 60 // Convert to minutes
+    suspend fun checkAndNotifyContacts(location: Location) {
+        try {
+            val contacts = getContacts()
+            val userId = auth.currentUser?.uid ?: return
+            val userName = auth.currentUser?.displayName ?: "Someone"
+            
+            android.util.Log.d("LocationService", "Checking ${contacts.size} contacts")
+            
+            for (contact in contacts) {
+                val distance = calculateDistance(
+                    location.latitude,
+                    location.longitude,
+                    contact.destinationLat,
+                    contact.destinationLng
+                )
+                
+                val eta = calculateETA(distance, location.speed.toDouble())
+                
+                android.util.Log.d("LocationService", "Distance: ${distance}m, ETA: ${eta}min")
+                
+                if (eta <= 2 && !contact.notified2Min && distance > 100) {
+                    android.util.Log.d("LocationService", "Sending 2-min notification")
+                    sendNotificationToContact(
+                        contact.email,
+                        "$userName is 2 minutes away",
+                        "ETA: 2 minutes"
+                    )
+                    
+                    firestore.collection("users")
+                        .document(userId)
+                        .collection("contacts")
+                        .document(contact.email)
+                        .update("notified2Min", true)
+                        .await()
+                }
+                
+                if (distance <= 100 && !contact.notifiedArrived) {
+                    android.util.Log.d("LocationService", "Sending arrival notification")
+                    sendNotificationToContact(
+                        contact.email,
+                        "$userName has arrived",
+                        "They are at the destination"
+                    )
+                    
+                    firestore.collection("users")
+                        .document(userId)
+                        .collection("contacts")
+                        .document(contact.email)
+                        .update("notifiedArrived", true)
+                        .await()
                 }
             }
-
-            null
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            android.util.Log.e("LocationService", "Error checking contacts", e)
         }
     }
 
-    suspend fun checkAndNotifyContacts(currentLocation: Location) {
-        val userId = auth.currentUser?.uid ?: return
-        val contacts = getContacts()
-
-        for (contact in contacts) {
-            val distance = calculateDistance(
-                currentLocation.latitude,
-                currentLocation.longitude,
-                contact.destinationLat,
-                contact.destinationLng
+    suspend fun sendDepartureNotification(contactEmail: String, userName: String) {
+        try {
+            sendNotificationToContact(
+                contactEmail,
+                "$userName has left",
+                "$userName is on the way to you"
             )
-
-            val eta = calculateETA(distance, currentLocation.speed.toDouble())
-
-            // Notify when 2 minutes away
-            if (eta <= 2 && !contact.notified2Min && distance > 100) {
-                sendNotification(contact.email, "2_minutes", eta)
-                updateContactNotification(contact.email, "notified2Min", true)
-            }
-
-            // Notify when arrived (within 100 meters)
-            if (distance <= 100 && !contact.notifiedArrived) {
-                sendNotification(contact.email, "arrived", 0)
-                updateContactNotification(contact.email, "notifiedArrived", true)
-            }
+            android.util.Log.d("LocationService", "Departure notification sent to $contactEmail")
+        } catch (e: Exception) {
+            android.util.Log.e("LocationService", "Error sending departure notification", e)
         }
-    }
-
-    private suspend fun updateContactNotification(contactEmail: String, field: String, value: Boolean) {
-        val userId = auth.currentUser?.uid ?: return
-        
-        firestore.collection("users")
-            .document(userId)
-            .collection("contacts")
-            .document(contactEmail)
-            .update(field, value)
-            .await()
-    }
-
-    private fun sendNotification(recipientEmail: String, type: String, eta: Int) {
-        val userId = auth.currentUser?.uid ?: return
-        val userName = auth.currentUser?.displayName ?: auth.currentUser?.email ?: "Someone"
-
-        // Get recipient's FCM token from Firestore
-        firestore.collection("users")
-            .whereEqualTo("email", recipientEmail)
-            .get()
-            .addOnSuccessListener { documents ->
-                for (document in documents) {
-                    val fcmToken = document.getString("fcmToken")
-                    if (fcmToken != null) {
-                        // Send notification via FCM
-                        val notificationData = hashMapOf(
-                            "token" to fcmToken,
-                            "from" to userName,
-                            "type" to type,
-                            "eta" to eta,
-                            "timestamp" to System.currentTimeMillis()
-                        )
-                        
-                        // Queue notification for Cloud Function to send
-                        firestore.collection("notifications")
-                            .add(notificationData)
-                            .addOnSuccessListener {
-                                // Also show local notification for testing
-                                val message = when (type) {
-                                    "2_minutes" -> "$userName is 2 minutes away (ETA: $eta min)"
-                                    "arrived" -> "$userName has arrived"
-                                    else -> "Location update from $userName"
-                                }
-                                NotificationHelper.showLocalNotification(
-                                    context,
-                                    "OnTheWay Update",
-                                    message
-                                )
-                            }
-                            .addOnFailureListener { e ->
-                                e.printStackTrace()
-                            }
-                    }
-                }
-            }
-            .addOnFailureListener { e ->
-                e.printStackTrace()
-            }
     }
     
+    private suspend fun sendNotificationToContact(contactEmail: String, title: String, message: String) {
+        try {
+            val userSnapshot = firestore.collection("users")
+                .whereEqualTo("email", contactEmail)
+                .limit(1)
+                .get()
+                .await()
+            
+            val targetUserId = userSnapshot.documents.firstOrNull()?.id ?: return
+            
+            val notificationData = hashMapOf(
+                "title" to title,
+                "message" to message,
+                "type" to "ETA",
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            firestore.collection("users")
+                .document(targetUserId)
+                .collection("notifications")
+                .add(notificationData)
+                .await()
+            
+            NotificationHelper.showLocalNotification(context, title, message)
+        } catch (e: Exception) {
+            android.util.Log.e("LocationService", "Error sending notification", e)
+        }
+    }
+
     suspend fun saveFCMToken(token: String) {
         val userId = auth.currentUser?.uid ?: return
-        
-        firestore.collection("users")
-            .document(userId)
-            .update("fcmToken", token)
-            .await()
+        try {
+            firestore.collection("users")
+                .document(userId)
+                .update("fcmToken", token)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
 
@@ -424,14 +492,12 @@ class GeofenceBroadcastReceiver : android.content.BroadcastReceiver() {
         val geofenceTransition = geofencingEvent.geofenceTransition
 
         if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER) {
-            // User entered geofence
             NotificationHelper.showLocalNotification(
                 context,
                 "Arrived",
                 "You have arrived at your destination"
             )
         } else if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {
-            // User left geofence
             NotificationHelper.showLocalNotification(
                 context,
                 "Left",

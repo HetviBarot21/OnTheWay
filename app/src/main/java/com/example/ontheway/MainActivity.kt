@@ -85,6 +85,9 @@ class MainActivity : ComponentActivity() {
             "sos" -> SOSScreen(
                 onBack = { currentScreen = "home" }
             )
+            "simulation" -> SimulationScreen(
+                onBack = { currentScreen = "home" }
+            )
             "landing" -> LandingPage(
                 onGetStarted = { currentScreen = "login" }
             )
@@ -114,7 +117,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onNavigateToSettings = { currentScreen = "settings" },
                     onNavigateToCircles = { currentScreen = "circles" },
-                    onNavigateToSOS = { currentScreen = "sos" }
+                    onNavigateToSOS = { currentScreen = "sos" },
+                    onNavigateToSimulation = { currentScreen = "simulation" }
                 )
             }
             "settings" -> {

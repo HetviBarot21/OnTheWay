@@ -30,9 +30,9 @@ data class CircleMember(
     val longitude: Double = 0.0,
     val lastUpdated: Long = 0L,
     val isActive: Boolean = false,
-    val isOnline: Boolean = false,
+    val batteryLevel: Int = 0,
+    val isCharging: Boolean = false,
     val isSharingTrip: Boolean = false,
-    val activeTrip: Trip? = null,
     val tripDestinationLat: Double? = null,
     val tripDestinationLng: Double? = null,
     val eta: Int? = null
@@ -45,7 +45,9 @@ data class LocationUpdate(
     val longitude: Double = 0.0,
     val timestamp: Long = 0L,
     val speed: Float = 0f,
-    val accuracy: Float = 0f
+    val accuracy: Float = 0f,
+    val batteryLevel: Int = 0,
+    val isCharging: Boolean = false
 )
 
 data class CircleInvite(

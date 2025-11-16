@@ -209,104 +209,6 @@ fun SOSScreen(
         )
     }
 
-    // Function to send SOS alerts
-    suspend fun sendSOSAlerts() {
-        isSending = true
-        try {
-            val userId = auth.currentUser?.uid ?: throw Exception("Not authenticated")
-            val userName = auth.currentUser?.displayName ?: auth.currentUser?.email ?: "Someone"
-            
-            // Get current location
-            val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-            
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
-                != PackageManager.PERMISSION_GRANTED) {
-                throw Exception("Location permission not granted")
-            }
-            
-            val location = fusedLocationClient.lastLocation.await()
-            if (location == null) {
-                throw Exception("Could not get current location")
-            }
-            
-            val latitude = location.latitude
-            val longitude = location.longitude
-            val mapsLink = "https://maps.google.com/?q=$latitude,$longitude"
-            
-            // Get all circles user is in
-            val circles = circleService.getUserCircles()
-            
-            if (circles.isEmpty()) {
-                throw Exception("You are not in any circles")
-            }
-            
-            // Send notification to all circle members
-            var notificationsSent = 0
-            for (circle in circles) {
-                for (memberId in circle.members) {
-                    if (memberId != userId) { // Don't send to yourself
-                        try {
-                            // Get member's FCM token
-                            val memberDoc = firestore.collection("users")
-                                .document(memberId)
-                                .get()
-                                .await()
-                            
-                            val fcmToken = memberDoc.getString("fcmToken")
-                            
-                            if (fcmToken != null) {
-                                // Create notification document
-                                val notification = hashMapOf(
-                                    "token" to fcmToken,
-                                    "type" to "sos",
-                                    "from" to userName,
-                                    "fromUserId" to userId,
-                                    "latitude" to latitude,
-                                    "longitude" to longitude,
-                                    "mapsLink" to mapsLink,
-                                    "timestamp" to System.currentTimeMillis(),
-                                    "title" to "🚨 EMERGENCY SOS",
-                                    "body" to "$userName needs help! Tap to see location."
-                                )
-                                
-                                firestore.collection("notifications")
-                                    .add(notification)
-                                    .await()
-                                
-                                notificationsSent++
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("SOSScreen", "Error sending to $memberId", e)
-                        }
-                    }
-                }
-            }
-            
-            // Store SOS event
-            val sosEvent = hashMapOf(
-                "userId" to userId,
-                "userName" to userName,
-                "latitude" to latitude,
-                "longitude" to longitude,
-                "timestamp" to System.currentTimeMillis(),
-                "notificationsSent" to notificationsSent
-            )
-            
-            firestore.collection("sos_events")
-                .add(sosEvent)
-                .await()
-            
-            sosTriggered = true
-            android.util.Log.d("SOSScreen", "SOS sent to $notificationsSent members")
-            
-        } catch (e: Exception) {
-            android.util.Log.e("SOSScreen", "Error sending SOS", e)
-            sosError = e.message
-        } finally {
-            isSending = false
-        }
-    }
-
     // Countdown effect
     LaunchedEffect(showCountdown, countdown) {
         if (showCountdown && countdown > 0) {
@@ -316,7 +218,162 @@ fun SOSScreen(
             // SOS triggered - send alerts!
             showCountdown = false
             countdown = 15
-            sendSOSAlerts()
+            
+            // Send SOS alerts directly in LaunchedEffect
+            isSending = true
+            try {
+                val userId = auth.currentUser?.uid ?: throw Exception("Not authenticated")
+                val userName = auth.currentUser?.displayName ?: auth.currentUser?.email ?: "Someone"
+                
+                // Get current location
+                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                    throw Exception("Location permission not granted")
+                }
+                
+                val location = fusedLocationClient.lastLocation.await()
+                if (location == null) {
+                    throw Exception("Could not get current location")
+                }
+                
+                val latitude = location.latitude
+                val longitude = location.longitude
+                val mapsLink = "https://maps.google.com/?q=$latitude,$longitude"
+                
+                // Get all circles user is in
+                val circles = circleService.getUserCircles()
+                
+                if (circles.isEmpty()) {
+                    throw Exception("You are not in any circles")
+                }
+                
+                // Send notification to all circle members
+                var notificationsSent = 0
+                for (circle in circles) {
+                    for (memberId in circle.members) {
+                        if (memberId != userId) {
+                            try {
+                                val memberDoc = firestore.collection("users")
+                                    .document(memberId)
+                                    .get()
+                                    .await()
+                                
+                                val memberEmail = memberDoc.getString("email")
+                                
+                                if (memberEmail != null) {
+                                    // Create SOS notification
+                                    val notification = hashMapOf(
+                                        "title" to "🚨 EMERGENCY SOS",
+                                        "message" to "$userName has sent an SOS! Last known location: $mapsLink",
+                                        "type" to "SOS",
+                                        "fromUserId" to userId,
+                                        "fromUserName" to userName,
+                                        "latitude" to latitude,
+                                        "longitude" to longitude,
+                                        "mapsLink" to mapsLink,
+                                        "timestamp" to System.currentTimeMillis()
+                                    )
+                                    
+                                    // Add to member's notifications collection
+                                    firestore.collection("users")
+                                        .document(memberId)
+                                        .collection("notifications")
+                                        .add(notification)
+                                        .await()
+                                    
+                                    // Send email notification
+                                    try {
+                                        val emailData = hashMapOf(
+                                            "to" to memberEmail,
+                                            "from" to "noreply@ontheway.app",
+                                            "subject" to "🚨 EMERGENCY SOS from $userName",
+                                            "html" to """
+                                                <html>
+                                                <body style="font-family: Arial, sans-serif; padding: 20px;">
+                                                    <div style="background-color: #d32f2f; color: white; padding: 20px; border-radius: 8px;">
+                                                        <h1>🚨 EMERGENCY SOS ALERT</h1>
+                                                    </div>
+                                                    <div style="padding: 20px; background-color: #f5f5f5; margin-top: 20px; border-radius: 8px;">
+                                                        <p style="font-size: 18px;"><strong>$userName</strong> has sent an emergency SOS alert!</p>
+                                                        
+                                                        <h3>Last Known Location:</h3>
+                                                        <p>
+                                                            <strong>Latitude:</strong> $latitude<br>
+                                                            <strong>Longitude:</strong> $longitude
+                                                        </p>
+                                                        
+                                                        <a href="$mapsLink" style="display: inline-block; background-color: #4285f4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin-top: 10px;">
+                                                            View on Google Maps
+                                                        </a>
+                                                        
+                                                        <p style="margin-top: 20px; color: #666;">
+                                                            <strong>Time:</strong> ${java.text.SimpleDateFormat("MMM dd, yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}
+                                                        </p>
+                                                        
+                                                        <p style="margin-top: 20px; color: #d32f2f; font-weight: bold;">
+                                                            Please check on them immediately!
+                                                        </p>
+                                                    </div>
+                                                    <p style="margin-top: 20px; color: #999; font-size: 12px;">
+                                                        This is an automated message from OnTheWay App
+                                                    </p>
+                                                </body>
+                                                </html>
+                                            """.trimIndent(),
+                                            "timestamp" to System.currentTimeMillis(),
+                                            "status" to "pending"
+                                        )
+                                        
+                                        firestore.collection("mail")
+                                            .add(emailData)
+                                            .await()
+                                        
+                                        android.util.Log.d("SOSScreen", "Email queued for $memberEmail")
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("SOSScreen", "Error sending email to $memberEmail", e)
+                                    }
+                                    
+                                    // Show local notification
+                                    NotificationHelper.showLocalNotification(
+                                        context,
+                                        "🚨 EMERGENCY SOS",
+                                        "$userName has sent an SOS! Location: $latitude, $longitude"
+                                    )
+                                    
+                                    notificationsSent++
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("SOSScreen", "Error sending to $memberId", e)
+                            }
+                        }
+                    }
+                }
+                
+                // Store SOS event
+                val sosEvent = hashMapOf(
+                    "userId" to userId,
+                    "userName" to userName,
+                    "latitude" to latitude,
+                    "longitude" to longitude,
+                    "timestamp" to System.currentTimeMillis(),
+                    "notificationsSent" to notificationsSent
+                )
+                
+                firestore.collection("sos_events")
+                    .add(sosEvent)
+                    .await()
+                
+                sosTriggered = true
+                android.util.Log.d("SOSScreen", "SOS sent to $notificationsSent members")
+                
+            } catch (e: Exception) {
+                android.util.Log.e("SOSScreen", "Error sending SOS", e)
+                sosError = e.message
+            } finally {
+                isSending = false
+            }
         }
     }
     

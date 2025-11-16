@@ -22,7 +22,7 @@ import androidx.core.content.ContextCompat
 import com.example.ontheway.models.Circle
 import com.example.ontheway.models.CircleMember
 import com.example.ontheway.services.CircleService
-import com.example.ontheway.services.OnlineStatusManager
+
 import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.Style
@@ -44,26 +44,16 @@ fun CircleDetailScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val circleService = remember { CircleService() }
-    val onlineStatusManager = remember { OnlineStatusManager(context) }
     
     var members by remember { mutableStateOf(listOf<CircleMember>()) }
     var circle by remember { mutableStateOf<Circle?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var showMembersList by remember { mutableStateOf(false) }
     var showInviteDialog by remember { mutableStateOf(false) }
-    var onlineStatuses by remember { mutableStateOf(mapOf<String, Boolean>()) }
 
     // Load circle info and refresh members every 10 seconds
     LaunchedEffect(circleId) {
         android.util.Log.d("CircleDetailScreen", "Starting circle detail for: $circleId")
-        
-        // Force update own status immediately
-        try {
-            onlineStatusManager.setOnlineStatus(true)
-            android.util.Log.d("CircleDetailScreen", "Set own status to online")
-        } catch (e: Exception) {
-            android.util.Log.e("CircleDetailScreen", "Error setting own status", e)
-        }
         
         // Load circle info once
         val circles = circleService.getUserCircles()
@@ -74,28 +64,16 @@ fun CircleDetailScreen(
             val fetchedMembers = circleService.getCircleMembers(circleId)
             android.util.Log.d("CircleDetailScreen", "Fetched ${fetchedMembers.size} members")
             
-            // Check online status for each member - SIMPLIFIED
-            val membersWithStatus = fetchedMembers.map { member ->
-                // User is online if their location was updated within the last 2 minutes
-                val timeSinceUpdate = System.currentTimeMillis() - member.lastUpdated
-                val isOnline = timeSinceUpdate < 120000 // 2 minutes = 120000 milliseconds
-                
-                android.util.Log.d("CircleDetailScreen", "${member.name}: lastUpdated=${member.lastUpdated}, timeSince=${timeSinceUpdate}ms, isOnline=$isOnline")
-                
-                member.copy(isOnline = isOnline)
-            }
+            // Members already have isActive calculated in CircleService
+            android.util.Log.d("CircleDetailScreen", "Members: ${fetchedMembers.map { "${it.name}: isActive=${it.isActive}" }}")
             
-            members = membersWithStatus
+            members = fetchedMembers
             isLoading = false
             delay(5000) // 5 seconds - faster refresh for testing
         }
     }
     
-    DisposableEffect(Unit) {
-        onDispose {
-            onlineStatusManager.stopObserving()
-        }
-    }
+
 
     Scaffold(
         topBar = {
@@ -269,10 +247,10 @@ fun MemberCard(member: CircleMember) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Online status indicator
+                    // Active status indicator
                     Surface(
                         shape = MaterialTheme.shapes.extraLarge,
-                        color = if (member.isOnline) androidx.compose.ui.graphics.Color(0xFF4CAF50) else androidx.compose.ui.graphics.Color(0xFF9E9E9E),
+                        color = if (member.isActive) androidx.compose.ui.graphics.Color(0xFF4CAF50) else androidx.compose.ui.graphics.Color(0xFF9E9E9E),
                         modifier = Modifier.size(12.dp)
                     ) {}
                     
