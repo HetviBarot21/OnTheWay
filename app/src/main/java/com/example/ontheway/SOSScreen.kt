@@ -36,7 +36,7 @@ fun SOSScreen(
     val emailService = remember { EmailNotificationService() }
     
     var showCountdown by remember { mutableStateOf(false) }
-    var countdown by remember { mutableIntStateOf(15) }
+    var countdown by remember { mutableIntStateOf(10) }
     var isSending by remember { mutableStateOf(false) }
     var sosTriggered by remember { mutableStateOf(false) }
     var sosError by remember { mutableStateOf<String?>(null) }
@@ -95,29 +95,46 @@ fun SOSScreen(
                 var emailsSent = 0
                 var notificationsSent = 0
                 
+                android.util.Log.d("SOSScreen", "=== Starting member processing ===")
+                
                 // Send notification to all circle members
                 for (circle in circles) {
                     android.util.Log.d("SOSScreen", "Processing circle: ${circle.name} with ${circle.members.size} members")
+                    android.util.Log.d("SOSScreen", "Circle members: ${circle.members}")
                     
                     for (memberId in circle.members) {
                         // Skip current user and already processed members
-                        if (memberId == userId || processedMembers.contains(memberId)) {
+                        if (memberId == userId) {
+                            android.util.Log.d("SOSScreen", "Skipping current user: $memberId")
+                            continue
+                        }
+                        
+                        if (processedMembers.contains(memberId)) {
+                            android.util.Log.d("SOSScreen", "Skipping already processed member: $memberId")
                             continue
                         }
                         
                         processedMembers.add(memberId)
+                        android.util.Log.d("SOSScreen", "Processing new member: $memberId")
                         
                         try {
                             // Get member's data from Firestore
+                            android.util.Log.d("SOSScreen", "Fetching user data for: $memberId")
                             val memberDoc = firestore.collection("users")
                                 .document(memberId)
                                 .get()
                                 .await()
                             
+                            if (!memberDoc.exists()) {
+                                android.util.Log.w("SOSScreen", "User document doesn't exist for: $memberId")
+                                continue
+                            }
+                            
                             val memberEmail = memberDoc.getString("email")
                             val memberName = memberDoc.getString("name") ?: memberEmail ?: "Unknown"
                             
-                            android.util.Log.d("SOSScreen", "Processing member: $memberName ($memberEmail)")
+                            android.util.Log.d("SOSScreen", "Member data: name=$memberName, email=$memberEmail")
+                            android.util.Log.d("SOSScreen", "Email is ${if (memberEmail.isNullOrEmpty()) "EMPTY/NULL" else "VALID"}")
                             
                             if (memberEmail != null && memberEmail.isNotEmpty()) {
                                 // Create SOS notification in Firestore
@@ -145,14 +162,15 @@ fun SOSScreen(
                                 notificationsSent++
                                 android.util.Log.d("SOSScreen", "Notification created for $memberName")
                                 
-                                // Send email notification
+                                // Send email notification using same pattern as Share Ride
                                 try {
-                                    android.util.Log.d("SOSScreen", "=== Attempting to queue email ===")
-                                    android.util.Log.d("SOSScreen", "Recipient: $memberEmail")
-                                    android.util.Log.d("SOSScreen", "Sender: $userName")
-                                    android.util.Log.d("SOSScreen", "Location: $latitude, $longitude")
+                                    android.util.Log.d("SOSScreen", "=== Queueing SOS email ===")
+                                    android.util.Log.d("SOSScreen", "To: $memberEmail")
+                                    android.util.Log.d("SOSScreen", "From: $userName")
                                     
-                                    emailService.sendSOSEmail(
+                                    // Use the same EmailNotificationService instance
+                                    val emailSvc = EmailNotificationService()
+                                    emailSvc.sendSOSEmail(
                                         memberEmail,
                                         userName,
                                         latitude,
@@ -160,11 +178,9 @@ fun SOSScreen(
                                         timestamp
                                     )
                                     emailsSent++
-                                    android.util.Log.d("SOSScreen", "✓ SOS email successfully queued for $memberEmail")
+                                    android.util.Log.d("SOSScreen", "✓ Email queued for $memberEmail")
                                 } catch (e: Exception) {
-                                    android.util.Log.e("SOSScreen", "✗ FAILED to queue SOS email to $memberEmail", e)
-                                    android.util.Log.e("SOSScreen", "Error type: ${e.javaClass.simpleName}")
-                                    android.util.Log.e("SOSScreen", "Error message: ${e.message}")
+                                    android.util.Log.e("SOSScreen", "✗ Email failed for $memberEmail", e)
                                     e.printStackTrace()
                                 }
                             } else {
@@ -190,6 +206,16 @@ fun SOSScreen(
                     "circlesCount" to circles.size,
                     "uniqueMembersNotified" to processedMembers.size
                 )
+                
+                android.util.Log.d("SOSScreen", "=== Member Processing Complete ===")
+                android.util.Log.d("SOSScreen", "Total members processed: ${processedMembers.size}")
+                android.util.Log.d("SOSScreen", "Notifications created: $notificationsSent")
+                android.util.Log.d("SOSScreen", "Emails queued: $emailsSent")
+                
+                if (emailsSent == 0) {
+                    android.util.Log.e("SOSScreen", "⚠️ WARNING: NO EMAILS WERE QUEUED!")
+                    android.util.Log.e("SOSScreen", "Check if members have email addresses in Firestore")
+                }
                 
                 android.util.Log.d("SOSScreen", "=== Storing SOS Event ===")
                 android.util.Log.d("SOSScreen", "Notifications sent: $notificationsSent")
@@ -282,7 +308,7 @@ fun SOSScreen(
                 Button(
                     onClick = {
                         showCountdown = false
-                        countdown = 15
+                        countdown = 10
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.secondary
@@ -332,7 +358,7 @@ fun SOSScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("1. Press the SOS button")
-                    Text("2. 15-second countdown begins")
+                    Text("2. 10-second countdown begins")
                     Text("3. All circle members will be notified")
                     Text("4. Your location will be shared")
                 }
@@ -408,7 +434,7 @@ fun SOSScreen(
         } else if (showCountdown && countdown == 0) {
             // Reset countdown state
             showCountdown = false
-            countdown = 15
+            countdown = 10
             // Trigger SOS sending
             sendSOS()
         }

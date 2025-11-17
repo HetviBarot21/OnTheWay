@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -316,15 +317,6 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("OnTheWay") },
                 actions = {
-                    IconButton(
-                        onClick = onNavigateToSOS,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Icon(Icons.Default.Warning, contentDescription = "Emergency SOS")
-                    }
-
                     IconButton(onClick = onNavigateToCircles) {
                         Icon(Icons.Default.Add, contentDescription = "Manage Circles")
                     }
@@ -723,6 +715,8 @@ fun MemberCard(
     var currentETA by remember { mutableStateOf<Int?>(null) }
     var currentDistance by remember { mutableStateOf<Double?>(null) }
     var locationName by remember { mutableStateOf<String?>(null) }
+    var showSOSCountdown by remember { mutableStateOf(false) }
+    var sosCountdown by remember { mutableIntStateOf(10) }
     
     // Check if this is the current user
     val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
@@ -1010,62 +1004,213 @@ fun MemberCard(
                 }
             }
             
-            // Right side: Button - only show if not current user and they have a valid location
-            if (!isCurrentUser && member.latitude != 0.0 && member.longitude != 0.0) {
-                if (isSharing) {
-                    // Show "Stop Sharing" button if I'm going to them
-                    Button(
+            // Right side: Buttons - only show if not current user
+            if (!isCurrentUser) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // SOS Button - always show for other members
+                    IconButton(
                         onClick = {
-                            scope.launch {
-                                try {
-                                    locationService.removeContact(member.email)
-                                    isSharing = false
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Stopped sharing with ${member.name}",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                } catch (e: Exception) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Failed to stop sharing: ${e.message}",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
+                            showSOSCountdown = true
+                            sosCountdown = 10
                         },
-                        modifier = Modifier.height(36.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text("Stop Sharing", fontSize = 12.sp)
-                    }
-                } else if (!someoneComingToMe) {
-                    // Only show "Share Ride" button if they're NOT already coming to me
-                    Button(
-                        onClick = {
-                            android.util.Log.d("ShareRideButton", "Button clicked for ${member.name}")
-                            onShareRide()
-                            isSharing = true
-                        },
-                        modifier = Modifier.height(36.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            Icons.Default.Share,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            Icons.Default.Warning,
+                            contentDescription = "Send SOS",
+                            tint = Color(0xFFD32F2F),
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share Ride", fontSize = 12.sp)
+                    }
+                    
+                    // Share Ride / Stop Sharing button - only show if they have valid location
+                    if (member.latitude != 0.0 && member.longitude != 0.0) {
+                        if (isSharing) {
+                            // Show "Stop Sharing" button if I'm going to them
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            locationService.removeContact(member.email)
+                                            isSharing = false
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Stopped sharing with ${member.name}",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        } catch (e: Exception) {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "Failed to stop sharing: ${e.message}",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Stop Sharing", fontSize = 12.sp)
+                            }
+                        } else if (!someoneComingToMe) {
+                            // Only show "Share Ride" button if they're NOT already coming to me
+                            Button(
+                                onClick = {
+                                    android.util.Log.d("ShareRideButton", "Button clicked for ${member.name}")
+                                    onShareRide()
+                                    isSharing = true
+                                },
+                                modifier = Modifier.height(36.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Share,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Share Ride", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
         }
-    }}
+    }
+    
+    // SOS Countdown Dialog
+    if (showSOSCountdown) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Sending SOS to ${member.name}") },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = sosCountdown.toString(),
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFD32F2F)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("seconds remaining")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showSOSCountdown = false
+                        sosCountdown = 10
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    
+    // Countdown effect
+    LaunchedEffect(showSOSCountdown, sosCountdown) {
+        if (showSOSCountdown && sosCountdown > 0) {
+            kotlinx.coroutines.delay(1000)
+            sosCountdown--
+        } else if (showSOSCountdown && sosCountdown == 0) {
+            showSOSCountdown = false
+            sosCountdown = 10
+            
+            // Send SOS
+            scope.launch {
+                try {
+                    android.util.Log.d("SOSButton", "Sending SOS to ${member.name}")
+                    
+                    val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+                    val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    val userId = auth.currentUser?.uid ?: throw Exception("Not authenticated")
+                    
+                    // Get current user info
+                    val currentUserDoc = firestore.collection("users")
+                        .document(userId)
+                        .get()
+                        .await()
+                    
+                    val currentUserEmail = currentUserDoc.getString("email") ?: auth.currentUser?.email ?: "Unknown"
+                    val userName = currentUserDoc.getString("name") ?: auth.currentUser?.displayName ?: currentUserEmail
+                    
+                    // Get current location
+                    val fusedLocationClient = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context)
+                    
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) 
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        
+                        val location = fusedLocationClient.lastLocation.await()
+                        if (location != null) {
+                            val latitude = location.latitude
+                            val longitude = location.longitude
+                            val timestamp = System.currentTimeMillis()
+                            
+                            // Send SOS email to this member
+                            if (member.email.isNotEmpty()) {
+                                val emailService = EmailNotificationService()
+                                emailService.sendSOSEmail(
+                                    member.email,
+                                    userName,
+                                    latitude,
+                                    longitude,
+                                    timestamp
+                                )
+                                
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "SOS sent to ${member.name}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                
+                                android.util.Log.d("SOSButton", "SOS sent to ${member.name}")
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "${member.name} has no email",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Could not get location",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    } else {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Location permission required",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("SOSButton", "Error sending SOS", e)
+                    android.widget.Toast.makeText(
+                        context,
+                        "Failed to send SOS: ${e.message}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+}
 
 
 
