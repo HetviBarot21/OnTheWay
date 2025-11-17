@@ -31,6 +31,7 @@ import com.example.ontheway.models.Circle
 import com.example.ontheway.models.CircleMember
 import com.example.ontheway.services.CircleService
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -215,6 +216,7 @@ fun CircleCard(circle: Circle, onClick: () -> Unit) {
     var isExpanded by remember { mutableStateOf(false) }
     var members by remember { mutableStateOf(listOf<CircleMember>()) }
     var isLoadingMembers by remember { mutableStateOf(false) }
+    var showEmailInviteDialog by remember { mutableStateOf(false) }
     
     // Load members when expanded or when circle members change
     LaunchedEffect(isExpanded, circle.members.size) {
@@ -294,19 +296,27 @@ fun CircleCard(circle: Circle, onClick: () -> Unit) {
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("Invite Code", circle.inviteCode)
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Code copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Row {
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("Invite Code", circle.inviteCode)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Code copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "Copy code",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
-                        ) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                contentDescription = "Copy code",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Button(
+                                onClick = { showEmailInviteDialog = true },
+                                modifier = Modifier.height(40.dp)
+                            ) {
+                                Text("Send via Email", fontSize = 12.sp)
+                            }
                         }
                     }
                     
@@ -493,6 +503,156 @@ fun CircleCard(circle: Circle, onClick: () -> Unit) {
             }
         )
     }
+    
+    if (showEmailInviteDialog) {
+        EmailInviteDialog(
+            circleName = circle.name,
+            inviteCode = circle.inviteCode,
+            onDismiss = { showEmailInviteDialog = false }
+        )
+    }
+}
+
+@Composable
+fun EmailInviteDialog(
+    circleName: String,
+    inviteCode: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+    val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+    
+    var recipientEmail by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+    var successMessage by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSending) onDismiss() },
+        title = { Text("Send Invite via Email") },
+        text = {
+            Column {
+                if (isSending) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Sending invite...")
+                        }
+                    }
+                } else if (successMessage.isNotEmpty()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "✓",
+                            fontSize = 48.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(successMessage)
+                    }
+                } else {
+                    Text(
+                        text = "Enter the email address of the person you want to invite to '$circleName'",
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    OutlinedTextField(
+                        value = recipientEmail,
+                        onValueChange = { 
+                            recipientEmail = it
+                            errorMessage = ""
+                        },
+                        label = { Text("Email Address") },
+                        placeholder = { Text("friend@example.com") },
+                        singleLine = true,
+                        isError = errorMessage.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    if (errorMessage.isNotEmpty()) {
+                        Text(
+                            text = errorMessage,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (successMessage.isNotEmpty()) {
+                Button(onClick = onDismiss) {
+                    Text("Done")
+                }
+            } else if (!isSending) {
+                Button(
+                    onClick = {
+                        if (recipientEmail.isBlank()) {
+                            errorMessage = "Please enter an email address"
+                            return@Button
+                        }
+                        
+                        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(recipientEmail).matches()) {
+                            errorMessage = "Please enter a valid email address"
+                            return@Button
+                        }
+                        
+                        scope.launch {
+                            isSending = true
+                            try {
+                                val userId = auth.currentUser?.uid ?: throw Exception("Not authenticated")
+                                
+                                // Get current user's name
+                                val currentUserDoc = firestore.collection("users")
+                                    .document(userId)
+                                    .get()
+                                    .await()
+                                
+                                val senderName = currentUserDoc.getString("name") 
+                                    ?: auth.currentUser?.displayName 
+                                    ?: auth.currentUser?.email 
+                                    ?: "Someone"
+                                
+                                // Send invite email
+                                val emailService = EmailNotificationService()
+                                emailService.sendCircleInviteEmail(
+                                    recipientEmail,
+                                    senderName,
+                                    circleName,
+                                    inviteCode
+                                )
+                                
+                                successMessage = "Invite sent to $recipientEmail!"
+                                android.util.Log.d("EmailInvite", "Invite sent to $recipientEmail")
+                            } catch (e: Exception) {
+                                android.util.Log.e("EmailInvite", "Error sending invite", e)
+                                errorMessage = "Failed to send invite: ${e.message}"
+                            } finally {
+                                isSending = false
+                            }
+                        }
+                    },
+                    enabled = recipientEmail.isNotBlank()
+                ) {
+                    Text("Send Invite")
+                }
+            }
+        },
+        dismissButton = {
+            if (!isSending && successMessage.isEmpty()) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        }
+    )
 }
 
 @Composable
