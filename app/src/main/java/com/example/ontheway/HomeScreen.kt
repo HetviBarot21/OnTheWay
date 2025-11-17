@@ -135,7 +135,11 @@ fun HomeScreen(
                     members.addAll(circleMembers)
                 }
                 
-                val updatedMembers = members.distinctBy { it.userId }
+                // Filter out current user and get distinct members
+                val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                val updatedMembers = members
+                    .distinctBy { it.userId }
+                    .filter { it.userId != currentUserId }
                 
                 // Log position changes
                 updatedMembers.forEach { newMember ->
@@ -374,18 +378,12 @@ fun HomeScreen(
                                     // Share ride with this member - use their location as destination
                                     locationService.addContact(
                                         member.email,
+                                        member.userId,
                                         member.latitude,
                                         member.longitude
                                     )
                                     
                                     android.util.Log.d("ShareRide", "Contact added successfully")
-                                    
-                                    // Send "has left" notification
-                                    val userName = com.google.firebase.auth.FirebaseAuth.getInstance()
-                                        .currentUser?.displayName ?: "Someone"
-                                    locationService.sendDepartureNotification(member.email, userName)
-                                    
-                                    android.util.Log.d("ShareRide", "Notification sent")
                                     
                                     // Show confirmation
                                     android.widget.Toast.makeText(
@@ -782,12 +780,22 @@ fun MemberCard(
                 val contact = contacts.find { it.email == member.email }
                 isSharing = contact != null
                 
+                android.util.Log.d("MemberCard", "Checking ${member.name}: isSharing=$isSharing")
+                
                 // Check if they're coming to me
                 val incomingRides = locationService.getIncomingRides()
+                android.util.Log.d("MemberCard", "Incoming rides count: ${incomingRides.size}")
+                
+                incomingRides.forEach { ride ->
+                    android.util.Log.d("MemberCard", "Incoming ride from: ${ride["senderEmail"]} (looking for ${member.email})")
+                }
+                
                 val incomingRide = incomingRides.find { 
                     it["senderEmail"] == member.email 
                 }
                 val someoneComingToMe = incomingRide != null
+                
+                android.util.Log.d("MemberCard", "${member.name} coming to me: $someoneComingToMe")
                 
                 if (ContextCompat.checkSelfPermission(
                         context,
@@ -926,21 +934,22 @@ fun MemberCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Show last updated time instead of active/offline
+                            // Show last updated time
                             if (member.lastUpdated > 0) {
                                 val timeDiff = System.currentTimeMillis() - member.lastUpdated
                                 val minutesAgo = (timeDiff / 60000).toInt()
+                                val hoursAgo = minutesAgo / 60
+                                val daysAgo = hoursAgo / 24
+                                
                                 Text(
                                     text = when {
                                         minutesAgo < 1 -> "Just now"
                                         minutesAgo < 60 -> "$minutesAgo min ago"
-                                        else -> "${minutesAgo / 60}h ago"
+                                        hoursAgo < 24 -> "${hoursAgo}h ago"
+                                        else -> "${daysAgo}d ago"
                                     },
                                     fontSize = 12.sp,
-                                    color = if (member.isActive) 
-                                        MaterialTheme.colorScheme.primary 
-                                    else 
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             
@@ -1007,6 +1016,7 @@ fun MemberCard(
                 } else {
                     Button(
                         onClick = {
+                            android.util.Log.d("ShareRideButton", "Button clicked for ${member.name}")
                             onShareRide()
                             isSharing = true
                         },
