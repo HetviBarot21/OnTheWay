@@ -375,6 +375,19 @@ fun HomeScreen(
                                 try {
                                     android.util.Log.d("ShareRide", "Starting ride share with ${member.email}")
                                     
+                                    // Get current user info
+                                    val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                                    val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                    
+                                    val currentUserDoc = firestore.collection("users")
+                                        .document(currentUserId ?: "")
+                                        .get()
+                                        .await()
+                                    
+                                    val senderName = currentUserDoc.getString("name") 
+                                        ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName 
+                                        ?: "Someone"
+                                    
                                     // Share ride with this member - use their location as destination
                                     locationService.addContact(
                                         member.email,
@@ -384,6 +397,17 @@ fun HomeScreen(
                                     )
                                     
                                     android.util.Log.d("ShareRide", "Contact added successfully")
+                                    
+                                    // Send email notification
+                                    if (member.email.isNotEmpty()) {
+                                        try {
+                                            val emailService = EmailNotificationService()
+                                            emailService.sendDepartureEmail(member.email, senderName)
+                                            android.util.Log.d("ShareRide", "Departure email sent to ${member.email}")
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("ShareRide", "Failed to send email", e)
+                                        }
+                                    }
                                     
                                     // Show confirmation
                                     android.widget.Toast.makeText(

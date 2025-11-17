@@ -501,3 +501,207 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 function toRadians(degrees) {
     return degrees * (Math.PI / 180);
 }
+
+/**
+ * Send SOS email notifications when an SOS event is created
+ * Triggered by: Firestore onCreate in /sos_events collection
+ */
+exports.sendSOSEmails = functions.firestore
+    .document('sos_events/{sosId}')
+    .onCreate(async (snap, context) => {
+        const sosData = snap.data();
+        const db = admin.firestore();
+        
+        try {
+            console.log('SOS event triggered:', sosData);
+            
+            const userId = sosData.userId;
+            const userName = sosData.userName || 'Someone';
+            const userEmail = sosData.userEmail || '';
+            const latitude = sosData.latitude;
+            const longitude = sosData.longitude;
+            const mapsLink = sosData.mapsLink || `https://maps.google.com/?q=${latitude},${longitude}`;
+            const timestamp = sosData.timestamp || Date.now();
+            
+            // Get all circles the user is in
+            const circlesSnapshot = await db.collection('circles')
+                .where('members', 'array-contains', userId)
+                .get();
+            
+            if (circlesSnapshot.empty) {
+                console.log('User is not in any circles');
+                return null;
+            }
+            
+            console.log(`Found ${circlesSnapshot.size} circles`);
+            
+            // Collect all unique member IDs
+            const memberIds = new Set();
+            circlesSnapshot.docs.forEach(doc => {
+                const circle = doc.data();
+                circle.members.forEach(memberId => {
+                    if (memberId !== userId) {
+                        memberIds.add(memberId);
+                    }
+                });
+            });
+            
+            console.log(`Found ${memberIds.size} unique members to notify`);
+            
+            // Send email to each member
+            let emailsSent = 0;
+            for (const memberId of memberIds) {
+                try {
+                    const memberDoc = await db.collection('users').doc(memberId).get();
+                    
+                    if (!memberDoc.exists) {
+                        console.log(`Member ${memberId} not found`);
+                        continue;
+                    }
+                    
+                    const memberData = memberDoc.data();
+                    const memberEmail = memberData.email;
+                    const memberName = memberData.name || memberEmail;
+                    
+                    if (!memberEmail) {
+                        console.log(`Member ${memberId} has no email`);
+                        continue;
+                    }
+                    
+                    console.log(`Sending SOS email to ${memberName} (${memberEmail})`);
+                    
+                    // Format timestamp
+                    const date = new Date(timestamp);
+                    const timeString = date.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    
+                    // Create email document in mail collection
+                    await db.collection('mail').add({
+                        to: memberEmail,
+                        message: {
+                            subject: `🚨 EMERGENCY SOS from ${userName}`,
+                            html: `
+                                <html>
+                                    <body style="font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;">
+                                        <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                                            <!-- Header -->
+                                            <div style="background-color: #d32f2f; color: white; padding: 30px 20px; text-align: center;">
+                                                <h1 style="margin: 0; font-size: 32px;">🚨 EMERGENCY SOS ALERT</h1>
+                                            </div>
+                                            
+                                            <!-- Content -->
+                                            <div style="padding: 30px 20px;">
+                                                <p style="font-size: 18px; margin-bottom: 20px;">
+                                                    <strong>${userName}</strong> has sent an emergency SOS alert!
+                                                </p>
+                                                
+                                                <div style="background-color: #fff3e0; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0;">
+                                                    <p style="margin: 0; font-size: 16px; font-weight: bold; color: #d32f2f;">
+                                                        ⚠️ Please check on them immediately!
+                                                    </p>
+                                                </div>
+                                                
+                                                <h3 style="margin-top: 30px; margin-bottom: 15px; color: #333;">Last Known Location:</h3>
+                                                <div style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                                                    <p style="margin: 5px 0;"><strong>Latitude:</strong> ${latitude}</p>
+                                                    <p style="margin: 5px 0;"><strong>Longitude:</strong> ${longitude}</p>
+                                                    <p style="margin: 5px 0;"><strong>Time:</strong> ${timeString}</p>
+                                                </div>
+                                                
+                                                <div style="text-align: center; margin: 30px 0;">
+                                                    <a href="${mapsLink}" 
+                                                       style="display: inline-block; 
+                                                              background-color: #4285f4; 
+                                                              color: white; 
+                                                              padding: 15px 30px; 
+                                                              text-decoration: none; 
+                                                              border-radius: 4px; 
+                                                              font-size: 16px;
+                                                              font-weight: bold;">
+                                                        📍 View Location on Google Maps
+                                                    </a>
+                                                </div>
+                                                
+                                                <div style="background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 15px; margin: 20px 0;">
+                                                    <p style="margin: 0; font-size: 14px; color: #1976d2;">
+                                                        <strong>What to do:</strong><br>
+                                                        1. Try calling ${userName} immediately<br>
+                                                        2. Check their location on the map<br>
+                                                        3. Contact emergency services if needed<br>
+                                                        4. Coordinate with other circle members
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Footer -->
+                                            <div style="background-color: #f5f5f5; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                                <p style="margin: 0; color: #999; font-size: 12px;">
+                                                    This is an automated emergency message from OnTheWay App<br>
+                                                    Sent to: ${memberEmail}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </body>
+                                </html>
+                            `,
+                            text: `
+🚨 EMERGENCY SOS ALERT
+
+${userName} has sent an emergency SOS alert!
+
+⚠️ Please check on them immediately!
+
+Last Known Location:
+Latitude: ${latitude}
+Longitude: ${longitude}
+Time: ${timeString}
+
+View on Google Maps: ${mapsLink}
+
+What to do:
+1. Try calling ${userName} immediately
+2. Check their location on the map
+3. Contact emergency services if needed
+4. Coordinate with other circle members
+
+This is an automated emergency message from OnTheWay App
+                            `.trim()
+                        },
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    
+                    emailsSent++;
+                    console.log(`Email queued for ${memberEmail}`);
+                    
+                } catch (error) {
+                    console.error(`Error sending email to member ${memberId}:`, error);
+                }
+            }
+            
+            // Update SOS event with email count
+            await snap.ref.update({
+                emailsSentByFunction: emailsSent,
+                processedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            
+            console.log(`SOS emails sent: ${emailsSent} out of ${memberIds.size} members`);
+            return null;
+            
+        } catch (error) {
+            console.error('Error processing SOS event:', error);
+            
+            // Mark as failed
+            await snap.ref.update({
+                error: error.message,
+                failedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            
+            return null;
+        }
+    });
