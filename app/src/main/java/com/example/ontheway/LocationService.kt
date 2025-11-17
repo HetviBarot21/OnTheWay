@@ -198,13 +198,13 @@ class LocationService(private val context: Context) {
             }
     }
 
-    suspend fun addContact(contactEmail: String, destinationLat: Double, destinationLng: Double) {
+    suspend fun addContact(contactEmail: String, recipientUserId: String, destinationLat: Double, destinationLng: Double) {
         val userId = auth.currentUser?.uid ?: run {
             android.util.Log.e("LocationService", "User not authenticated")
             return
         }
         
-        android.util.Log.d("LocationService", "Adding contact: $contactEmail")
+        android.util.Log.d("LocationService", "Adding contact: $contactEmail (userId: $recipientUserId)")
         
         val contact = Contact(
             email = contactEmail,
@@ -225,27 +225,24 @@ class LocationService(private val context: Context) {
             
             android.util.Log.d("LocationService", "Contact saved")
             
-            // Also create a shared ride document so recipient can see it
-            val recipientUserId = getUserIdByEmail(contactEmail)
-            if (recipientUserId != null) {
-                val rideData = hashMapOf(
-                    "senderId" to userId,
-                    "senderEmail" to (auth.currentUser?.email ?: ""),
-                    "recipientId" to recipientUserId,
-                    "recipientEmail" to contactEmail,
-                    "destinationLat" to destinationLat,
-                    "destinationLng" to destinationLng,
-                    "startTime" to System.currentTimeMillis(),
-                    "active" to true
-                )
-                
-                firestore.collection("activeRides")
-                    .document("${userId}_${recipientUserId}")
-                    .set(rideData)
-                    .await()
-                
-                android.util.Log.d("LocationService", "Active ride created")
-            }
+            // Create a shared ride document so recipient can see it
+            val rideData = hashMapOf(
+                "senderId" to userId,
+                "senderEmail" to (auth.currentUser?.email ?: ""),
+                "recipientId" to recipientUserId,
+                "recipientEmail" to contactEmail,
+                "destinationLat" to destinationLat,
+                "destinationLng" to destinationLng,
+                "startTime" to System.currentTimeMillis(),
+                "active" to true
+            )
+            
+            firestore.collection("activeRides")
+                .document("${userId}_${recipientUserId}")
+                .set(rideData)
+                .await()
+            
+            android.util.Log.d("LocationService", "Active ride created: ${userId}_${recipientUserId}")
             
             addGeofence(
                 "contact_$contactEmail",
@@ -259,37 +256,6 @@ class LocationService(private val context: Context) {
         }
     }
     
-    private suspend fun getUserIdByEmail(email: String): String? {
-        return try {
-            // Try to get from circle members first (more reliable)
-            val circles = circleService.getUserCircles()
-            for (circle in circles) {
-                val members = circleService.getCircleMembers(circle.circleId)
-                val member = members.find { it.email == email }
-                if (member != null) {
-                    return member.userId
-                }
-            }
-            
-            // Fallback: try direct query (may fail without index)
-            try {
-                val snapshot = firestore.collection("users")
-                    .whereEqualTo("email", email)
-                    .limit(1)
-                    .get()
-                    .await()
-                
-                snapshot.documents.firstOrNull()?.id
-            } catch (e: Exception) {
-                android.util.Log.w("LocationService", "Direct email query failed, using circle lookup only")
-                null
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("LocationService", "Error getting user ID", e)
-            null
-        }
-    }
-
     suspend fun removeContact(contactEmail: String) {
         val userId = auth.currentUser?.uid ?: return
         
@@ -300,13 +266,19 @@ class LocationService(private val context: Context) {
             .delete()
             .await()
         
-        // Also remove the active ride
-        val recipientUserId = getUserIdByEmail(contactEmail)
-        if (recipientUserId != null) {
-            firestore.collection("activeRides")
-                .document("${userId}_${recipientUserId}")
-                .delete()
+        // Also remove any active rides with this email
+        try {
+            val snapshot = firestore.collection("activeRides")
+                .whereEqualTo("senderId", userId)
+                .whereEqualTo("recipientEmail", contactEmail)
+                .limit(1)
+                .get()
                 .await()
+            
+            snapshot.documents.firstOrNull()?.reference?.delete()?.await()
+            android.util.Log.d("LocationService", "Active ride removed")
+        } catch (e: Exception) {
+            android.util.Log.w("LocationService", "Could not find active ride to delete", e)
         }
         
         removeGeofence("contact_$contactEmail")
@@ -315,6 +287,8 @@ class LocationService(private val context: Context) {
     suspend fun getIncomingRides(): List<Map<String, Any>> {
         val userId = auth.currentUser?.uid ?: return emptyList()
         
+        android.util.Log.d("LocationService", "Checking incoming rides for userId: $userId")
+        
         return try {
             val snapshot = firestore.collection("activeRides")
                 .whereEqualTo("recipientId", userId)
@@ -322,7 +296,14 @@ class LocationService(private val context: Context) {
                 .get()
                 .await()
             
-            snapshot.documents.mapNotNull { it.data }
+            android.util.Log.d("LocationService", "Found ${snapshot.documents.size} incoming rides")
+            
+            val rides = snapshot.documents.mapNotNull { doc ->
+                android.util.Log.d("LocationService", "Incoming ride: ${doc.id} - ${doc.data}")
+                doc.data
+            }
+            
+            rides
         } catch (e: Exception) {
             android.util.Log.e("LocationService", "Error getting incoming rides", e)
             emptyList()

@@ -13,3 +13,23 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Node modules and npm
+node_modules/
+firebase-functions/node_modules/
+firebase-functions/package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Kotlin error logs
+.kotlin/errors/
+*.log
+
+# Nested duplicate project
+OnTheWay/
+
+# IDE
+.vscode/
+.kiro/

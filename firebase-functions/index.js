@@ -255,65 +255,231 @@ exports.onCircleJoin = functions.firestore
     });
 
 /**
- * Calculate and update ETA for active trips
- * Runs every minute
+ * Send email notification when ride is shared
+ * Triggered when activeRides document is created
  */
-exports.updateETAs = functions.pubsub
+exports.sendRideShareEmail = functions.firestore
+    .document('activeRides/{rideId}')
+    .onCreate(async (snap, context) => {
+        const ride = snap.data();
+        const db = admin.firestore();
+        
+        try {
+            // Get recipient user details
+            const recipientDoc = await db.collection('users').doc(ride.recipientId).get();
+            const recipientData = recipientDoc.data();
+            
+            if (!recipientData || !recipientData.email) {
+                console.log('Recipient email not found');
+                return null;
+            }
+            
+            // Get sender user details
+            const senderDoc = await db.collection('users').doc(ride.senderId).get();
+            const senderData = senderDoc.data();
+            const senderName = senderData?.name || ride.senderEmail;
+            
+            // Create email notification document
+            await db.collection('mail').add({
+                to: recipientData.email,
+                message: {
+                    subject: `${senderName} is on the way to you!`,
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <h2 style="color: #6200EE;">🚗 Someone is coming to you!</h2>
+                            <p style="font-size: 16px;">
+                                <strong>${senderName}</strong> has started sharing their ride with you.
+                            </p>
+                            <p style="font-size: 14px; color: #666;">
+                                You'll receive updates as they get closer to your location.
+                            </p>
+                            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                                <p style="margin: 5px 0;"><strong>From:</strong> ${senderName}</p>
+                                <p style="margin: 5px 0;"><strong>Started:</strong> ${new Date(ride.startTime).toLocaleString()}</p>
+                            </div>
+                            <p style="font-size: 12px; color: #999; margin-top: 30px;">
+                                Open the OnTheWay app to see real-time location and ETA.
+                            </p>
+                        </div>
+                    `
+                }
+            });
+            
+            console.log(`Ride share email sent to ${recipientData.email}`);
+            return null;
+        } catch (error) {
+            console.error('Error sending ride share email:', error);
+            return null;
+        }
+    });
+
+/**
+ * Send email when ETA reaches 5 minutes
+ * Monitors activeRides and sends email notification
+ */
+exports.sendETAEmailNotifications = functions.pubsub
     .schedule('every 1 minutes')
     .onRun(async (context) => {
         const db = admin.firestore();
         
         try {
-            // Get all active trips
-            const tripsSnapshot = await db.collection('trips')
-                .where('isActive', '==', true)
+            // Get all active rides
+            const ridesSnapshot = await db.collection('activeRides')
+                .where('active', '==', true)
                 .get();
             
-            if (tripsSnapshot.empty) {
+            if (ridesSnapshot.empty) {
                 return null;
             }
             
-            const batch = db.batch();
-            
-            for (const tripDoc of tripsSnapshot.docs) {
-                const trip = tripDoc.data();
+            for (const rideDoc of ridesSnapshot.docs) {
+                const ride = rideDoc.data();
                 
-                // Get user's current location
-                const locationDoc = await db.collection('locations')
-                    .doc(trip.userId)
+                // Get sender's current location
+                const senderCircles = await db.collection('circles')
+                    .where('members', 'array-contains', ride.senderId)
+                    .limit(1)
                     .get();
                 
-                if (!locationDoc.exists) continue;
+                if (senderCircles.empty) continue;
                 
-                const location = locationDoc.data();
+                const circleId = senderCircles.docs[0].id;
+                const memberDoc = await db.collection('circles')
+                    .doc(circleId)
+                    .collection('members')
+                    .doc(ride.senderId)
+                    .get();
                 
-                // Calculate distance
+                if (!memberDoc.exists) continue;
+                
+                const senderLocation = memberDoc.data();
+                
+                // Calculate distance to recipient
                 const distance = calculateDistance(
-                    location.latitude,
-                    location.longitude,
-                    trip.destinationLat,
-                    trip.destinationLng
+                    senderLocation.latitude,
+                    senderLocation.longitude,
+                    ride.destinationLat,
+                    ride.destinationLng
                 );
                 
-                // Calculate ETA (assuming average speed of 50 km/h)
-                const eta = Math.round(distance / 13.89 / 60); // minutes
+                // Calculate ETA in minutes
+                const eta = Math.round(distance / 13.89 / 60);
                 
-                // Update trip with new ETA
-                batch.update(tripDoc.ref, {
-                    currentETA: eta,
-                    lastETAUpdate: admin.firestore.FieldValue.serverTimestamp()
-                });
+                // Send email at 5 minutes if not already sent
+                if (eta <= 5 && eta > 0 && !ride.email5MinSent) {
+                    await sendETAEmail(db, ride, eta, '5 minutes');
+                    await rideDoc.ref.update({ email5MinSent: true });
+                }
+                
+                // Send email at 2 minutes if not already sent
+                if (eta <= 2 && eta > 0 && !ride.email2MinSent) {
+                    await sendETAEmail(db, ride, eta, '2 minutes');
+                    await rideDoc.ref.update({ email2MinSent: true });
+                }
+                
+                // Send arrival email if arrived
+                if (distance < 100 && !ride.emailArrivedSent) {
+                    await sendArrivalEmail(db, ride);
+                    await rideDoc.ref.update({ 
+                        emailArrivedSent: true,
+                        active: false 
+                    });
+                }
             }
-            
-            await batch.commit();
-            console.log(`Updated ETAs for ${tripsSnapshot.size} trips`);
             
             return null;
         } catch (error) {
-            console.error('Error updating ETAs:', error);
+            console.error('Error sending ETA emails:', error);
             return null;
         }
     });
+
+/**
+ * Helper function to send ETA email
+ */
+async function sendETAEmail(db, ride, eta, milestone) {
+    try {
+        const recipientDoc = await db.collection('users').doc(ride.recipientId).get();
+        const recipientData = recipientDoc.data();
+        
+        if (!recipientData || !recipientData.email) return;
+        
+        const senderDoc = await db.collection('users').doc(ride.senderId).get();
+        const senderData = senderDoc.data();
+        const senderName = senderData?.name || ride.senderEmail;
+        
+        await db.collection('mail').add({
+            to: recipientData.email,
+            message: {
+                subject: `${senderName} is ${milestone} away!`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #6200EE;">🚗 Almost There!</h2>
+                        <p style="font-size: 18px; font-weight: bold; color: #333;">
+                            ${senderName} is approximately <span style="color: #6200EE;">${eta} minute${eta !== 1 ? 's' : ''}</span> away!
+                        </p>
+                        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                            <p style="font-size: 48px; margin: 0; color: #6200EE;">${eta}</p>
+                            <p style="font-size: 16px; margin: 5px 0; color: #666;">minute${eta !== 1 ? 's' : ''} away</p>
+                        </div>
+                        <p style="font-size: 14px; color: #666;">
+                            Get ready! They'll be arriving soon.
+                        </p>
+                        <p style="font-size: 12px; color: #999; margin-top: 30px;">
+                            Open the OnTheWay app to see their exact location.
+                        </p>
+                    </div>
+                `
+            }
+        });
+        
+        console.log(`ETA email (${milestone}) sent to ${recipientData.email}`);
+    } catch (error) {
+        console.error('Error sending ETA email:', error);
+    }
+}
+
+/**
+ * Helper function to send arrival email
+ */
+async function sendArrivalEmail(db, ride) {
+    try {
+        const recipientDoc = await db.collection('users').doc(ride.recipientId).get();
+        const recipientData = recipientDoc.data();
+        
+        if (!recipientData || !recipientData.email) return;
+        
+        const senderDoc = await db.collection('users').doc(ride.senderId).get();
+        const senderData = senderDoc.data();
+        const senderName = senderData?.name || ride.senderEmail;
+        
+        await db.collection('mail').add({
+            to: recipientData.email,
+            message: {
+                subject: `${senderName} has arrived!`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #4CAF50;">📍 Arrived!</h2>
+                        <p style="font-size: 18px; font-weight: bold; color: #333;">
+                            ${senderName} has arrived at your location!
+                        </p>
+                        <div style="background-color: #E8F5E9; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                            <p style="font-size: 48px; margin: 0;">✓</p>
+                            <p style="font-size: 16px; margin: 5px 0; color: #4CAF50;">Arrived</p>
+                        </div>
+                        <p style="font-size: 14px; color: #666;">
+                            The ride tracking has ended.
+                        </p>
+                    </div>
+                `
+            }
+        });
+        
+        console.log(`Arrival email sent to ${recipientData.email}`);
+    } catch (error) {
+        console.error('Error sending arrival email:', error);
+    }
+}
 
 /**
  * Calculate distance between two coordinates using Haversine formula
