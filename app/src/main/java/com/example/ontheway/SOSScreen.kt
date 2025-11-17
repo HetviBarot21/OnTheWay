@@ -33,6 +33,7 @@ fun SOSScreen(
     val auth = FirebaseAuth.getInstance()
     val firestore = FirebaseFirestore.getInstance()
     val circleService = remember { CircleService() }
+    val emailService = remember { EmailNotificationService() }
     
     var showCountdown by remember { mutableStateOf(false) }
     var countdown by remember { mutableStateOf(15) }
@@ -283,56 +284,18 @@ fun SOSScreen(
                                         .add(notification)
                                         .await()
                                     
-                                    // Send email notification
+                                    // Send email notification using EmailNotificationService
                                     try {
-                                        val emailData = hashMapOf(
-                                            "to" to memberEmail,
-                                            "from" to "noreply@ontheway.app",
-                                            "subject" to "🚨 EMERGENCY SOS from $userName",
-                                            "html" to """
-                                                <html>
-                                                <body style="font-family: Arial, sans-serif; padding: 20px;">
-                                                    <div style="background-color: #d32f2f; color: white; padding: 20px; border-radius: 8px;">
-                                                        <h1>🚨 EMERGENCY SOS ALERT</h1>
-                                                    </div>
-                                                    <div style="padding: 20px; background-color: #f5f5f5; margin-top: 20px; border-radius: 8px;">
-                                                        <p style="font-size: 18px;"><strong>$userName</strong> has sent an emergency SOS alert!</p>
-                                                        
-                                                        <h3>Last Known Location:</h3>
-                                                        <p>
-                                                            <strong>Latitude:</strong> $latitude<br>
-                                                            <strong>Longitude:</strong> $longitude
-                                                        </p>
-                                                        
-                                                        <a href="$mapsLink" style="display: inline-block; background-color: #4285f4; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin-top: 10px;">
-                                                            View on Google Maps
-                                                        </a>
-                                                        
-                                                        <p style="margin-top: 20px; color: #666;">
-                                                            <strong>Time:</strong> ${java.text.SimpleDateFormat("MMM dd, yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}
-                                                        </p>
-                                                        
-                                                        <p style="margin-top: 20px; color: #d32f2f; font-weight: bold;">
-                                                            Please check on them immediately!
-                                                        </p>
-                                                    </div>
-                                                    <p style="margin-top: 20px; color: #999; font-size: 12px;">
-                                                        This is an automated message from OnTheWay App
-                                                    </p>
-                                                </body>
-                                                </html>
-                                            """.trimIndent(),
-                                            "timestamp" to System.currentTimeMillis(),
-                                            "status" to "pending"
+                                        emailService.sendSOSEmail(
+                                            memberEmail,
+                                            userName,
+                                            latitude,
+                                            longitude,
+                                            System.currentTimeMillis()
                                         )
-                                        
-                                        firestore.collection("mail")
-                                            .add(emailData)
-                                            .await()
-                                        
-                                        android.util.Log.d("SOSScreen", "Email queued for $memberEmail")
+                                        android.util.Log.d("SOSScreen", "SOS email queued for $memberEmail")
                                     } catch (e: Exception) {
-                                        android.util.Log.e("SOSScreen", "Error sending email to $memberEmail", e)
+                                        android.util.Log.e("SOSScreen", "Error sending SOS email to $memberEmail", e)
                                     }
                                     
                                     // Show local notification

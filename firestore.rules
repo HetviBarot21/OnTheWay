@@ -121,5 +121,21 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
     }
+    
+    // Mail collection - for Trigger Email extension
+    match /mail/{mailId} {
+      // Only allow creating email documents (extension handles the rest)
+      allow create: if isAuthenticated();
+      // Allow reading own emails
+      allow read: if isAuthenticated();
+    }
+    
+    // Active rides collection - for ride sharing
+    match /activeRides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
   }
 }

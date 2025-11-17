@@ -46,6 +46,7 @@ class LocationService(private val context: Context) {
     private val firestore = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
     private val circleService = CircleService()
+    private val emailService = EmailNotificationService()
 
     private var locationCallback: LocationCallback? = null
     private var lastETACheck = 0L
@@ -378,6 +379,9 @@ class LocationService(private val context: Context) {
                         "ETA: 2 minutes"
                     )
                     
+                    // Send email notification
+                    emailService.send2MinuteEmail(contact.email, userName)
+                    
                     firestore.collection("users")
                         .document(userId)
                         .collection("contacts")
@@ -393,6 +397,9 @@ class LocationService(private val context: Context) {
                         "$userName has arrived",
                         "They are at the destination"
                     )
+                    
+                    // Send email notification
+                    emailService.sendArrivalEmail(contact.email, userName)
                     
                     firestore.collection("users")
                         .document(userId)
@@ -414,6 +421,10 @@ class LocationService(private val context: Context) {
                 "$userName has left",
                 "$userName is on the way to you"
             )
+            
+            // Send email notification
+            emailService.sendDepartureEmail(contactEmail, userName)
+            
             android.util.Log.d("LocationService", "Departure notification sent to $contactEmail")
         } catch (e: Exception) {
             android.util.Log.e("LocationService", "Error sending departure notification", e)
