@@ -75,12 +75,11 @@ object FirebaseAuthHelper {
         return try {
             val result = auth.signInWithEmailAndPassword(email, password).await()
             
-            // Update last login time
+            // Update last login time (non-blocking, don't wait for it)
             result.user?.let { user ->
                 firestore.collection("users")
                     .document(user.uid)
                     .update("updatedAt", System.currentTimeMillis())
-                    .await()
             }
             
             Result.success(result.user)
