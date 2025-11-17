@@ -136,11 +136,8 @@ fun HomeScreen(
                     members.addAll(circleMembers)
                 }
                 
-                // Filter out current user and get distinct members
-                val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
-                val updatedMembers = members
-                    .distinctBy { it.userId }
-                    .filter { it.userId != currentUserId }
+                // Include ALL members (including current user) and get distinct
+                val updatedMembers = members.distinctBy { it.userId }
                 
                 // Log position changes
                 updatedMembers.forEach { newMember ->
@@ -724,7 +721,7 @@ fun MemberCard(
     
     // Get location name for this member
     LaunchedEffect(member.latitude, member.longitude) {
-        if (member.isActive && member.latitude != 0.0 && member.longitude != 0.0) {
+        if (member.latitude != 0.0 && member.longitude != 0.0) {
             try {
                 val geocoder = Geocoder(context)
                 val addresses = geocoder.getFromLocation(member.latitude, member.longitude, 1)
