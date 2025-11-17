@@ -697,9 +697,14 @@ fun MemberCard(
     val scope = rememberCoroutineScope()
     val locationService = remember { LocationService(context) }
     var isSharing by remember { mutableStateOf(false) }
+    var someoneComingToMe by remember { mutableStateOf(false) }
     var currentETA by remember { mutableStateOf<Int?>(null) }
     var currentDistance by remember { mutableStateOf<Double?>(null) }
     var locationName by remember { mutableStateOf<String?>(null) }
+    
+    // Check if this is the current user
+    val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    val isCurrentUser = member.userId == currentUserId
     
     // Get location name for this member
     LaunchedEffect(member.latitude, member.longitude) {
@@ -787,7 +792,7 @@ fun MemberCard(
                 val incomingRide = incomingRides.find { 
                     it["senderEmail"] == member.email 
                 }
-                val someoneComingToMe = incomingRide != null
+                someoneComingToMe = incomingRide != null
                 
                 if (ContextCompat.checkSelfPermission(
                         context,
@@ -972,9 +977,10 @@ fun MemberCard(
                 }
             }
             
-            // Right side: Button - always show
-            if (member.latitude != 0.0 && member.longitude != 0.0) {
+            // Right side: Button - only show if not current user and they have a valid location
+            if (!isCurrentUser && member.latitude != 0.0 && member.longitude != 0.0) {
                 if (isSharing) {
+                    // Show "Stop Sharing" button if I'm going to them
                     Button(
                         onClick = {
                             scope.launch {
@@ -1002,9 +1008,10 @@ fun MemberCard(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("Stop Sharing Ride", fontSize = 12.sp)
+                        Text("Stop Sharing", fontSize = 12.sp)
                     }
-                } else {
+                } else if (!someoneComingToMe) {
+                    // Only show "Share Ride" button if they're NOT already coming to me
                     Button(
                         onClick = {
                             onShareRide()
